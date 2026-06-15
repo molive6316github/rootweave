@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "minAppVersion": "1.0.0",
   "description": "A conlang workspace for worldbuilders — manage roots, build words, validate grammar, and translate.",
-  "author": "Your Name",
-  "authorUrl": "https://github.com/yourusername/rootweave",
+  "author": "Max Oliver",
+  "authorUrl": "https://github.com/molive6316github/rootweave",
   "isDesktopOnly": false
 }
