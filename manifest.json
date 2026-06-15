@@ -1,0 +1,10 @@
+{
+  "id": "rootweave",
+  "name": "Rootweave",
+  "version": "1.0.0",
+  "minAppVersion": "1.0.0",
+  "description": "A conlang workspace for worldbuilders — manage roots, build words, validate grammar, and translate.",
+  "author": "Rootweave Contributors",
+  "authorUrl": "https://github.com/yourusername/rootweave",
+  "isDesktopOnly": false
+}

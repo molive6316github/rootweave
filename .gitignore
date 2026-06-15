@@ -1,0 +1,13 @@
+# Node modules — reinstall with `npm install`
+node_modules/
+
+# Build output — regenerated with `npm run build`
+main.js
+main.js.map
+
+# macOS metadata
+.DS_Store
+
+# Editor directories
+.idea/
+.vscode/

@@ -1,0 +1,545 @@
+/*
+ * Rootweave Plugin Styles
+ *
+ * We use Obsidian's CSS variables (--background-primary, --text-normal, etc.)
+ * instead of hardcoded colors. This means the plugin automatically looks right
+ * in light mode, dark mode, and any community theme the user has installed.
+ *
+ * Browse available variables: https://docs.obsidian.md/Reference/CSS+variables/
+ */
+
+/* ── Outer container ───────────────────────────────────────────────────────── */
+
+.rootweave-container {
+    padding: 8px 10px;
+    height: 100%;
+    overflow-y: auto;
+    font-family: var(--font-interface);
+    box-sizing: border-box;
+}
+
+.rw-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.rw-title {
+    font-size: 1.05em;
+    font-weight: 700;
+    color: var(--text-accent);
+    letter-spacing: 0.02em;
+}
+
+/* ── Tab bar ───────────────────────────────────────────────────────────────── */
+
+.rw-tab-bar {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    padding-bottom: 4px;
+    flex-wrap: wrap;
+}
+
+.rw-tab-btn {
+    background: none;
+    border: none;
+    padding: 3px 9px;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 0.82em;
+    border-radius: 4px;
+    transition: background 0.12s, color 0.12s;
+    font-family: var(--font-interface);
+}
+
+.rw-tab-btn:hover {
+    background: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+
+.rw-tab-btn.is-active {
+    color: var(--text-accent);
+    font-weight: 600;
+    background: var(--background-modifier-hover);
+}
+
+/* ── Content area ──────────────────────────────────────────────────────────── */
+
+.rw-content {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+/* ── Typography helpers ────────────────────────────────────────────────────── */
+
+.rw-subtitle {
+    color: var(--text-muted);
+    font-size: 0.8em;
+    margin: 0 0 10px 0;
+    line-height: 1.4;
+}
+
+.rw-label {
+    font-size: 0.78em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin: 8px 0 4px 0;
+}
+
+.rw-label-warn {
+    color: var(--color-orange, #f5a623);
+}
+
+.rw-empty {
+    color: var(--text-muted);
+    font-size: 0.82em;
+    font-style: italic;
+    margin: 6px 0;
+}
+
+.rw-ok {
+    color: var(--color-green, #4caf50);
+    font-size: 0.82em;
+    margin: 4px 0;
+}
+
+/* ── Form controls ─────────────────────────────────────────────────────────── */
+
+.rw-controls {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.rw-input {
+    background: var(--background-modifier-form-field);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    color: var(--text-normal);
+    padding: 4px 8px;
+    font-size: 0.82em;
+    flex: 1;
+    min-width: 80px;
+    font-family: var(--font-interface);
+    line-height: 1.4;
+}
+
+.rw-input:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+    box-shadow: 0 0 0 2px rgba(var(--interactive-accent-rgb, 124,58,237), 0.15);
+}
+
+.rw-input-lg {
+    font-size: 0.95em;
+    padding: 6px 10px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.rw-textarea {
+    background: var(--background-modifier-form-field);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    color: var(--text-normal);
+    padding: 6px 8px;
+    font-size: 0.82em;
+    width: 100%;
+    min-height: 70px;
+    resize: vertical;
+    font-family: var(--font-interface);
+    box-sizing: border-box;
+    line-height: 1.5;
+}
+
+.rw-textarea:focus {
+    outline: none;
+    border-color: var(--interactive-accent);
+}
+
+.rw-select {
+    background: var(--background-modifier-form-field);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    color: var(--text-normal);
+    padding: 4px 6px;
+    font-size: 0.82em;
+    font-family: var(--font-interface);
+    cursor: pointer;
+}
+
+/* ── Buttons ───────────────────────────────────────────────────────────────── */
+
+.rw-btn {
+    background: var(--background-modifier-form-field);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    color: var(--text-normal);
+    padding: 4px 11px;
+    cursor: pointer;
+    font-size: 0.82em;
+    font-family: var(--font-interface);
+    transition: background 0.12s;
+    white-space: nowrap;
+}
+
+.rw-btn:hover {
+    background: var(--background-modifier-hover);
+}
+
+.rw-btn-primary {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border-color: var(--interactive-accent);
+}
+
+.rw-btn-primary:hover {
+    background: var(--interactive-accent-hover);
+    border-color: var(--interactive-accent-hover);
+}
+
+.rw-btn-danger {
+    color: var(--text-error, #e05252);
+    border-color: transparent;
+    background: transparent;
+}
+
+.rw-btn-danger:hover {
+    background: var(--background-modifier-error, rgba(230, 80, 80, 0.1));
+}
+
+.rw-btn-sm {
+    padding: 2px 7px;
+    font-size: 0.78em;
+}
+
+/* ── Root lexicon cards ─────────────────────────────────────────────────────── */
+
+.rw-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding-bottom: 8px;
+}
+
+.rw-card {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    padding: 7px 10px;
+}
+
+.rw-card-info {
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
+    flex-wrap: wrap;
+    margin-bottom: 3px;
+}
+
+.rw-card-actions {
+    display: flex;
+    gap: 4px;
+    margin-top: 5px;
+}
+
+.rw-root-text {
+    font-weight: 700;
+    font-family: var(--font-monospace);
+    color: var(--text-accent);
+    font-size: 0.9em;
+}
+
+.rw-root-meaning {
+    color: var(--text-normal);
+    font-size: 0.82em;
+}
+
+.rw-root-notes {
+    color: var(--text-muted);
+    font-size: 0.78em;
+    font-style: italic;
+    margin-top: 2px;
+}
+
+/* Category / tag badges */
+.rw-badge {
+    background: var(--tag-background, rgba(124,58,237,0.12));
+    color: var(--tag-color, var(--text-accent));
+    border-radius: 10px;
+    padding: 1px 8px;
+    font-size: 0.72em;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.rw-badge-sm {
+    font-size: 0.68em;
+    padding: 0 5px;
+}
+
+/* ── Word Builder ───────────────────────────────────────────────────────────── */
+
+.rw-suggestions {
+    margin: 8px 0 4px;
+}
+
+.rw-suggestion-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 0;
+    font-size: 0.82em;
+    flex-wrap: wrap;
+}
+
+.rw-root-chip {
+    background: var(--background-modifier-hover);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    font-family: var(--font-monospace);
+    font-size: 0.88em;
+    color: var(--text-accent);
+    font-weight: 600;
+}
+
+.rw-meaning-hint {
+    color: var(--text-muted);
+    font-size: 0.78em;
+    font-style: italic;
+    margin: 5px 0 0 0;
+}
+
+.rw-violations {
+    margin: 4px 0;
+}
+
+.rw-violation-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 4px 8px;
+    background: var(--background-modifier-error, rgba(230, 80, 80, 0.07));
+    border-left: 3px solid var(--text-error, #e05252);
+    border-radius: 0 4px 4px 0;
+    font-size: 0.8em;
+    color: var(--text-error, #e05252);
+    margin-bottom: 3px;
+    cursor: help;
+    line-height: 1.4;
+}
+
+.rw-violation-icon {
+    flex-shrink: 0;
+    margin-top: 0.05em;
+}
+
+.rw-add-word-area {
+    margin-top: 14px;
+    border-top: 1px solid var(--background-modifier-border);
+    padding-top: 10px;
+}
+
+.rw-add-word-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+/* ── Dictionary table ──────────────────────────────────────────────────────── */
+
+.rw-dict-list {
+    overflow-x: auto;
+    padding-bottom: 8px;
+}
+
+.rw-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8em;
+}
+
+.rw-table th {
+    text-align: left;
+    padding: 4px 7px;
+    border-bottom: 2px solid var(--background-modifier-border);
+    color: var(--text-muted);
+    font-weight: 600;
+    white-space: nowrap;
+    font-size: 0.9em;
+}
+
+.rw-table td {
+    padding: 5px 7px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    vertical-align: middle;
+    line-height: 1.3;
+}
+
+.rw-table tr:hover td {
+    background: var(--background-modifier-hover);
+}
+
+.rw-word-cell {
+    font-family: var(--font-monospace);
+    color: var(--text-accent);
+    font-weight: 700;
+}
+
+/* ── Translator ─────────────────────────────────────────────────────────────── */
+
+.rw-toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8em;
+    color: var(--text-muted);
+    margin: 8px 0;
+    cursor: pointer;
+    user-select: none;
+}
+
+.rw-translator-output {
+    margin-top: 12px;
+}
+
+.rw-translation-line {
+    font-size: 0.95em;
+    line-height: 1.9;
+    padding: 10px 12px;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    margin-bottom: 8px;
+    word-break: break-word;
+}
+
+/* Known word: shown in accent color with a hover tooltip */
+.rw-word-found {
+    color: var(--text-accent);
+    font-weight: 600;
+    cursor: help;
+    border-bottom: 1px dotted var(--text-accent);
+}
+
+/* Unknown word: red with wavy underline */
+.rw-word-missing {
+    color: var(--text-error, #e05252);
+    text-decoration: underline wavy var(--text-error, #e05252);
+    cursor: help;
+}
+
+/* Interlinear gloss */
+.rw-gloss {
+    font-size: 0.85em;
+    margin-bottom: 10px;
+    overflow-x: auto;
+    padding: 10px 12px;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.rw-gloss-row {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.rw-gloss-original {
+    color: var(--text-normal);
+    font-weight: 600;
+}
+
+.rw-gloss-translation {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.rw-gloss-cell {
+    min-width: 36px;
+    text-align: center;
+}
+
+.rw-gloss-found   { color: var(--text-accent); }
+.rw-gloss-missing { color: var(--text-error, #e05252); }
+
+.rw-unknown-word {
+    color: var(--text-error, #e05252);
+    cursor: help;
+}
+
+.rw-copy-btn {
+    margin-top: 2px;
+}
+
+/* ── Export ─────────────────────────────────────────────────────────────────── */
+
+.rw-file-links {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 14px;
+}
+
+.rw-file-link {
+    text-align: left;
+    font-family: var(--font-monospace);
+    font-size: 0.78em;
+    color: var(--text-accent);
+}
+
+.rw-divider {
+    border-top: 1px solid var(--background-modifier-border);
+    margin: 12px 0;
+}
+
+.rw-export-stats {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 14px;
+    font-size: 0.82em;
+    color: var(--text-muted);
+    line-height: 1.8;
+}
+
+.rw-export-stats p {
+    margin: 0;
+}
+
+/* ── Modals (Add / Edit Root) ───────────────────────────────────────────────── */
+
+.rw-modal-field {
+    margin-bottom: 12px;
+}
+
+.rw-modal-field label {
+    display: block;
+    font-size: 0.82em;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.rw-modal-field .rw-input {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 0.9em;
+}
