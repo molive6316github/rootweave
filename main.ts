@@ -386,8 +386,8 @@ class RootweaveView extends ItemView {
 
     /** Full re-render. Simple and correct for a panel this size. */
     private render() {
-        // containerEl.children[1] is Obsidian's content area (children[0] is the header bar)
-        const container = this.containerEl.children[1] as HTMLElement;
+        // this.contentEl is the official Obsidian API property for the view's content area.
+        const container = this.contentEl;
         container.empty();
         container.addClass('rootweave-container');
 
