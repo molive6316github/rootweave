@@ -390,12 +390,12 @@ class RootweaveView extends ItemView {
         const body   = el.createEl('div', { cls: 'rw-content' });
 
         const TABS: { id: Tab; label: string }[] = [
-            { id: 'roots',      label: 'Roots'     },
-            { id: 'builder',    label: 'Builder'   },
-            { id: 'words',      label: 'Words'     },
-            { id: 'grammar',    label: 'Grammar'   },
-            { id: 'translator', label: 'Translate' },
-            { id: 'export',     label: 'Export'    },
+            { id: 'roots',      label: `Roots (${this.roots.length})`   },
+            { id: 'builder',    label: 'Builder'                        },
+            { id: 'words',      label: `Words (${this.words.length})`   },
+            { id: 'grammar',    label: `Grammar (${this.rules.length})` },
+            { id: 'translator', label: 'Translate'                      },
+            { id: 'export',     label: 'Export'                         },
         ];
 
         TABS.forEach(t => {
@@ -532,6 +532,19 @@ class RootweaveView extends ItemView {
                 });
             }
 
+            const existing = this.words.find(w => w.word.toLowerCase() === word.toLowerCase());
+            if (existing) {
+                const msg = saveArea.createEl('p', { cls: 'rw-ok', text: `✓ "${word}" is in the dictionary — ${existing.meaning}` });
+                msg.style.cursor = 'pointer';
+                msg.title = 'Click to edit';
+                msg.addEventListener('click', () => {
+                    new WordModal(this.app, existing, updated => {
+                        const i = this.words.findIndex(w => w.word === existing.word);
+                        if (i !== -1) this.words[i] = updated;
+                        void this.plugin.saveWords(this.words).then(() => analyze());
+                    }).open();
+                });
+            } else {
             saveArea.createEl('p', { cls: 'rw-label', text: 'Save to dictionary:' });
             const form      = saveArea.createEl('div', { cls: 'rw-add-word-form' });
             const meaningIn = form.createEl('input', { cls: 'rw-input', attr: { type: 'text', placeholder: 'English meaning' } });
@@ -540,9 +553,6 @@ class RootweaveView extends ItemView {
                 .addEventListener('click', () => {
                     const meaning = meaningIn.value.trim();
                     if (!meaning) { new Notice('Enter a meaning first.'); return; }
-                    if (this.words.some(w => w.word.toLowerCase() === word.toLowerCase())) {
-                        new Notice(`"${word}" is already in the dictionary.`); return;
-                    }
                     this.words.push({ word, meaning, pos: posIn.value.trim(), roots: matched.map(r => r.root) });
                     void this.plugin.saveWords(this.words).then(() => {
                         new Notice(`"${word}" added to dictionary!`);
@@ -550,6 +560,7 @@ class RootweaveView extends ItemView {
                         analyze();
                     });
                 });
+            } // end else (word not yet in dictionary)
         };
 
         wordInput.addEventListener('input', analyze);
@@ -560,7 +571,18 @@ class RootweaveView extends ItemView {
     private renderWords(el: HTMLElement) {
         const ctrl   = el.createEl('div', { cls: 'rw-controls' });
         const search = ctrl.createEl('input', { cls: 'rw-input', attr: { type: 'text', placeholder: 'Search words…' } });
-        const list   = el.createEl('div', { cls: 'rw-dict-list' });
+        ctrl.createEl('button', { cls: 'rw-btn rw-btn-primary', text: '+ Word' })
+            .addEventListener('click', () => {
+                new WordModal(this.app, null, word => {
+                    if (this.words.some(w => w.word.toLowerCase() === word.word.toLowerCase())) {
+                        new Notice(`"${word.word}" is already in the dictionary.`); return;
+                    }
+                    this.words.push(word);
+                    void this.plugin.saveWords(this.words).then(() => this.render());
+                }).open();
+            });
+
+        const list = el.createEl('div', { cls: 'rw-dict-list' });
 
         const draw = () => {
             list.empty();
@@ -570,7 +592,7 @@ class RootweaveView extends ItemView {
             );
 
             if (!visible.length) {
-                list.createEl('p', { cls: 'rw-empty', text: this.words.length === 0 ? 'No words yet. Use the Builder tab.' : 'No results.' });
+                list.createEl('p', { cls: 'rw-empty', text: this.words.length === 0 ? 'No words yet. Use the Builder tab or + Word.' : 'No results.' });
                 return;
             }
 
@@ -580,17 +602,25 @@ class RootweaveView extends ItemView {
             const tbody = table.createEl('tbody');
 
             visible.forEach(w => {
-                const row = tbody.createEl('tr');
+                const row  = tbody.createEl('tr');
                 row.createEl('td', { cls: 'rw-word-cell', text: w.word });
                 row.createEl('td', { text: w.meaning });
                 row.createEl('td', { text: w.pos });
                 row.createEl('td', { text: w.roots.join(', ') });
-                const del = row.createEl('td').createEl('button', { cls: 'rw-btn rw-btn-sm rw-btn-danger', text: '×' });
-                del.title = 'Remove from dictionary';
-                del.addEventListener('click', () => {
-                    this.words = this.words.filter(w2 => w2.word !== w.word);
-                    void this.plugin.saveWords(this.words).then(() => draw());
-                });
+                const acts = row.createEl('td');
+                acts.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Edit' })
+                    .addEventListener('click', () => {
+                        new WordModal(this.app, w, updated => {
+                            const i = this.words.findIndex(w2 => w2.word === w.word);
+                            if (i !== -1) this.words[i] = updated;
+                            void this.plugin.saveWords(this.words).then(() => draw());
+                        }).open();
+                    });
+                acts.createEl('button', { cls: 'rw-btn rw-btn-sm rw-btn-danger', text: '×' })
+                    .addEventListener('click', () => {
+                        this.words = this.words.filter(w2 => w2.word !== w.word);
+                        void this.plugin.saveWords(this.words).then(() => draw());
+                    });
             });
         };
 
@@ -796,6 +826,54 @@ class RootModal extends Modal {
         });
 
         [rootIn, altsIn, meaningIn, categoryIn, notesIn].forEach(inp =>
+            inp.addEventListener('keydown', e => { if (e.key === 'Enter') saveBtn.click(); })
+        );
+    }
+
+    onClose() { this.contentEl.empty(); }
+}
+
+// ─── Word Modal ───────────────────────────────────────────────────────────────
+
+class WordModal extends Modal {
+    private existing: Word | null;
+    private onSave: (word: Word) => void;
+
+    constructor(app: App, existing: Word | null, onSave: (word: Word) => void) {
+        super(app);
+        this.existing = existing;
+        this.onSave   = onSave;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.createEl('h2', { text: this.existing ? 'Edit Word' : 'Add Word' });
+
+        const field = (label: string, value: string, placeholder: string): HTMLInputElement => {
+            const wrap = contentEl.createEl('div', { cls: 'rw-modal-field' });
+            wrap.createEl('label', { text: label });
+            return wrap.createEl('input', { cls: 'rw-input', attr: { type: 'text', value, placeholder } });
+        };
+
+        const wordIn    = field('Word',           this.existing?.word                ?? '', 'e.g. veliu');
+        const meaningIn = field('Meaning',        this.existing?.meaning             ?? '', 'e.g. lights');
+        const posIn     = field('Part of speech', this.existing?.pos                 ?? '', 'noun, verb…');
+        const rootsIn   = field('Roots',          this.existing?.roots.join(', ')    ?? '', 'e.g. vel, iu — comma-separated');
+
+        const saveBtn = contentEl.createEl('button', { cls: 'rw-btn rw-btn-primary', text: 'Save' });
+        saveBtn.addEventListener('click', () => {
+            const word = wordIn.value.trim();
+            if (!word) { new Notice('Word cannot be empty.'); return; }
+            this.onSave({
+                word,
+                meaning: meaningIn.value.trim(),
+                pos:     posIn.value.trim(),
+                roots:   rootsIn.value.split(',').map(s => s.trim()).filter(Boolean),
+            });
+            this.close();
+        });
+
+        [wordIn, meaningIn, posIn, rootsIn].forEach(inp =>
             inp.addEventListener('keydown', e => { if (e.key === 'Enter') saveBtn.click(); })
         );
     }
