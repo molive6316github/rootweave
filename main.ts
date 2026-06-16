@@ -388,6 +388,13 @@ export default class RootweavePlugin extends Plugin {
     }
     async saveGrammar(rules: GrammarRule[]): Promise<void> { await this.writeMd(GRAMMAR_FILE, serializeGrammar(rules)); }
 
+    // Reload data from disk into any open RootweaveView (e.g. after import from settings)
+    async reloadView() {
+        for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+            if (leaf.view instanceof RootweaveView) await leaf.view.reload();
+        }
+    }
+
     // ── Plugin settings ────────────────────────────────────────────────────────
 
     async loadSettings() {
@@ -414,6 +421,17 @@ class RootweaveView extends ItemView {
     getViewType(): string    { return VIEW_TYPE; }
     getDisplayText(): string { return 'Rootweave'; }
     getIcon(): string        { return 'book-open'; }
+
+    async reload() {
+        try {
+            [this.roots, this.dictionary, this.grammar] = await Promise.all([
+                this.plugin.loadRoots(),
+                this.plugin.loadDictionary(),
+                this.plugin.loadGrammar(),
+            ]);
+        } catch (err) { console.error('Rootweave: reload error', err); }
+        this.render();
+    }
 
     async onOpen() {
         try {
@@ -1037,6 +1055,7 @@ class RootweaveSettingTab extends PluginSettingTab {
                                 }
                                 void this.plugin.saveRoots(merged).then(() => {
                                     new Notice(`Imported ${added} root${added !== 1 ? 's' : ''}${skipped ? `, skipped ${skipped} duplicate${skipped !== 1 ? 's' : ''}` : ''}.`);
+                                    void this.plugin.reloadView();
                                 }).catch(err => new Notice(`Save failed: ${err}`));
                             }).catch(err => new Notice(`Load failed: ${err}`));
                         } else {
@@ -1055,6 +1074,7 @@ class RootweaveSettingTab extends PluginSettingTab {
                                 }
                                 void this.plugin.saveDictionary(merged).then(() => {
                                     new Notice(`Imported ${added} word${added !== 1 ? 's' : ''}${skipped ? `, skipped ${skipped} duplicate${skipped !== 1 ? 's' : ''}` : ''}.`);
+                                    void this.plugin.reloadView();
                                 }).catch(err => new Notice(`Save failed: ${err}`));
                             }).catch(err => new Notice(`Load failed: ${err}`));
                         }
