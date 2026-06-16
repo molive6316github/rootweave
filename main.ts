@@ -358,7 +358,13 @@ export default class RootweavePlugin extends Plugin {
         if (existing instanceof TFile) {
             await this.app.vault.modify(existing, content);
         } else {
-            await this.app.vault.create(normalPath, content);
+            try {
+                await this.app.vault.create(normalPath, content);
+            } catch {
+                // File exists but not yet in vault cache — re-fetch and modify
+                const fresh = this.app.vault.getAbstractFileByPath(normalPath);
+                if (fresh instanceof TFile) await this.app.vault.modify(fresh, content);
+            }
         }
     }
 
