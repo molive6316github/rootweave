@@ -973,8 +973,7 @@ class RootweaveSettingTab extends PluginSettingTab {
             ta.setPlaceholder('vel light, clarity\nkar fire')
                 .onChange(value => { importData = value; });
             ta.inputEl.rows = 10;
-            ta.inputEl.style.width = '100%';
-            ta.inputEl.style.fontFamily = 'monospace';
+            ta.inputEl.addClass('rw-import-textarea');
         });
 
         const resultEl = containerEl.createEl('p', { cls: 'setting-item-description' });

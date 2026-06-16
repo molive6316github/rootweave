@@ -543,3 +543,10 @@
     box-sizing: border-box;
     font-size: 0.9em;
 }
+
+/* ── Settings: import textarea ──────────────────────────────────────────────── */
+
+.rw-import-textarea {
+    width: 100%;
+    font-family: var(--font-monospace);
+}
