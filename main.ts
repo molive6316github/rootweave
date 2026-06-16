@@ -208,6 +208,77 @@ function serializeGrammar(rules: GrammarRule[]): string {
     ].join('\n');
 }
 
+// ─── Import parser ───────────────────────────────────────────────────────────
+// Converts a user-defined template like "[root] - [meaning] ([category])"
+// into a regex, then applies it to each data line.
+
+function escapeRegexLiteral(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildImportParser(
+    template: string,
+    knownFields: string[]
+): { regex: RegExp; fieldOrder: string[] } | null {
+    const tokenRe = /\[(\w+)\]/g;
+    const fieldOrder: string[] = [];
+    let regexStr = '^';
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = tokenRe.exec(template)) !== null) {
+        const name = match[1].toLowerCase();
+        if (knownFields.includes(name)) {
+            regexStr += escapeRegexLiteral(template.slice(lastIndex, match.index));
+            regexStr += '(.+?)';
+            fieldOrder.push(name);
+            lastIndex = match.index + match[0].length;
+        }
+    }
+    regexStr += escapeRegexLiteral(template.slice(lastIndex)) + '$';
+
+    if (fieldOrder.length === 0) return null;
+    try {
+        return { regex: new RegExp(regexStr, 'i'), fieldOrder };
+    } catch {
+        return null;
+    }
+}
+
+function parseImportRoots(template: string, rawText: string): Root[] {
+    const parser = buildImportParser(template, ['root', 'meaning', 'category', 'notes']);
+    if (!parser) return [];
+    return rawText
+        .split('\n')
+        .map(l => l.trim())
+        .filter(l => l && !l.startsWith('#'))
+        .flatMap(line => {
+            const m = parser.regex.exec(line);
+            if (!m) return [];
+            const d: Record<string, string> = {};
+            parser.fieldOrder.forEach((f, i) => { d[f] = m[i + 1].trim(); });
+            if (!d['root']) return [];
+            return [{ root: d['root'], meaning: d['meaning'] ?? '', category: d['category'] ?? '', notes: d['notes'] ?? '' }];
+        });
+}
+
+function parseImportWords(template: string, rawText: string): DictionaryEntry[] {
+    const parser = buildImportParser(template, ['word', 'meaning', 'pos']);
+    if (!parser) return [];
+    return rawText
+        .split('\n')
+        .map(l => l.trim())
+        .filter(l => l && !l.startsWith('#'))
+        .flatMap(line => {
+            const m = parser.regex.exec(line);
+            if (!m) return [];
+            const d: Record<string, string> = {};
+            parser.fieldOrder.forEach((f, i) => { d[f] = m[i + 1].trim(); });
+            if (!d['word']) return [];
+            return [{ word: d['word'], meaning: d['meaning'] ?? '', partOfSpeech: d['pos'] ?? '', roots: [] }];
+        });
+}
+
 // ─── Main Plugin Class ────────────────────────────────────────────────────────
 
 export default class RootweavePlugin extends Plugin {
@@ -856,6 +927,112 @@ class RootweaveSettingTab extends PluginSettingTab {
                         new Notice('Open the Rootweave panel first to create Grammar.md.');
                     }
                 })
+            );
+
+        // ── Import ────────────────────────────────────────────────────────────
+        new Setting(containerEl).setName('Import').setHeading();
+
+        let importType: 'roots' | 'words' = 'roots';
+        let importTemplate = '[root] [meaning]';
+        let importData = '';
+
+        const ROOT_TOKENS = 'Tokens: [root], [meaning], [category], [notes]';
+        const WORD_TOKENS  = 'Tokens: [word], [meaning], [pos]';
+
+        const tokenHint = containerEl.createEl('p', {
+            cls: 'setting-item-description',
+            text: ROOT_TOKENS,
+        });
+
+        new Setting(containerEl)
+            .setName('Type')
+            .addDropdown(dd => dd
+                .addOption('roots', 'Roots')
+                .addOption('words', 'Words')
+                .setValue('roots')
+                .onChange(value => {
+                    importType = value as 'roots' | 'words';
+                    tokenHint.setText(importType === 'roots' ? ROOT_TOKENS : WORD_TOKENS);
+                })
+            );
+
+        new Setting(containerEl)
+            .setName('Format template')
+            .setDesc('Arrange the tokens to match your data. Each line will be parsed against this pattern.')
+            .addText(text =>
+                text
+                    .setPlaceholder('[root] [meaning]')
+                    .setValue('[root] [meaning]')
+                    .onChange(value => { importTemplate = value; })
+            );
+
+        const dataSetting = new Setting(containerEl)
+            .setName('Data')
+            .setDesc('One entry per line. Lines starting with # are skipped.');
+        dataSetting.addTextArea(ta => {
+            ta.setPlaceholder('vel light, clarity\nkar fire')
+                .onChange(value => { importData = value; });
+            ta.inputEl.rows = 10;
+            ta.inputEl.style.width = '100%';
+            ta.inputEl.style.fontFamily = 'monospace';
+        });
+
+        const resultEl = containerEl.createEl('p', { cls: 'setting-item-description' });
+
+        new Setting(containerEl)
+            .addButton(btn =>
+                btn
+                    .setButtonText('Import')
+                    .setCta()
+                    .onClick(() => {
+                        resultEl.setText('');
+                        if (!importTemplate.trim()) {
+                            resultEl.setText('Enter a format template first.');
+                            return;
+                        }
+                        if (!importData.trim()) {
+                            resultEl.setText('No data to import.');
+                            return;
+                        }
+
+                        if (importType === 'roots') {
+                            const parsed = parseImportRoots(importTemplate, importData);
+                            if (parsed.length === 0) {
+                                resultEl.setText('No lines matched the template. Check your format.');
+                                return;
+                            }
+                            void this.plugin.loadRoots().then(existing => {
+                                const merged = [...existing];
+                                let added = 0, skipped = 0;
+                                for (const r of parsed) {
+                                    if (merged.some(e => e.root === r.root)) { skipped++; continue; }
+                                    merged.push(r);
+                                    added++;
+                                }
+                                void this.plugin.saveRoots(merged).then(() => {
+                                    resultEl.setText(`✓ Imported ${added} root${added !== 1 ? 's' : ''}${skipped ? `, skipped ${skipped} duplicate${skipped !== 1 ? 's' : ''}` : ''}.`);
+                                });
+                            });
+                        } else {
+                            const parsed = parseImportWords(importTemplate, importData);
+                            if (parsed.length === 0) {
+                                resultEl.setText('No lines matched the template. Check your format.');
+                                return;
+                            }
+                            void this.plugin.loadDictionary().then(existing => {
+                                const merged = [...existing];
+                                let added = 0, skipped = 0;
+                                for (const w of parsed) {
+                                    if (merged.some(e => e.word.toLowerCase() === w.word.toLowerCase())) { skipped++; continue; }
+                                    merged.push(w);
+                                    added++;
+                                }
+                                void this.plugin.saveDictionary(merged).then(() => {
+                                    resultEl.setText(`✓ Imported ${added} word${added !== 1 ? 's' : ''}${skipped ? `, skipped ${skipped} duplicate${skipped !== 1 ? 's' : ''}` : ''}.`);
+                                });
+                            });
+                        }
+                    })
             );
     }
 }
