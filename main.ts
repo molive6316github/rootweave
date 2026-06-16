@@ -246,8 +246,8 @@ export default class RootweavePlugin extends Plugin {
                 leaf = rightLeaf;
             }
         }
-        // revealLeaf returns Promise<void> in modern Obsidian — mark as intentionally floating
-        if (leaf) void workspace.revealLeaf(leaf);
+        // setActiveLeaf is the stable void-returning alternative to the async revealLeaf
+        if (leaf) workspace.setActiveLeaf(leaf, { focus: true });
     }
 
     // ── Vault I/O ──────────────────────────────────────────────────────────────
