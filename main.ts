@@ -51,10 +51,12 @@ interface Word {
 }
 
 interface Rule {
-    description: string;
-    pattern: string;               // JavaScript regex
-    type: 'required' | 'forbidden';
-    message: string;               // shown to user when violated
+    name: string;                          // e.g. "Plural"
+    type: 'prefix' | 'suffix' | 'infix' | 'other';
+    form: string;                          // the affix, e.g. "-iu" or "on-"
+    meaning: string;                       // grammatical meaning, e.g. "plural marker"
+    example: string;                       // optional: "vel → veliu (lights)"
+    notes: string;                         // optional extra info
 }
 
 interface Settings {
@@ -64,8 +66,8 @@ interface Settings {
 const DEFAULT_SETTINGS: Settings = { language: 'My Conlang' };
 
 const DEFAULT_RULES: Rule[] = [
-    { description: 'Words must end in a vowel',     pattern: '[aeiou]$',    type: 'required',  message: 'Word does not end in a vowel.' },
-    { description: 'No triple consonants in a row', pattern: '[^aeiou]{3}', type: 'forbidden', message: 'Three consecutive consonants are not allowed.' },
+    { name: 'Plural',     type: 'suffix', form: '-iu',  meaning: 'plural marker', example: 'vel → veliu (lights)',    notes: '' },
+    { name: 'Past tense', type: 'prefix', form: 'on-',  meaning: 'past tense',    example: 'vel → onvel (was light)', notes: '' },
 ];
 
 // ─── Markdown table helpers ───────────────────────────────────────────────────
@@ -158,26 +160,39 @@ function wordsToMd(words: Word[]): string {
 function parseRules(content: string): Rule[] {
     return parseMdTable(content)
         .map((r): Rule => ({
-            description: r['description'] ?? '',
-            pattern:     r['pattern']     ?? '',
-            type:        r['type'] === 'forbidden' ? 'forbidden' : 'required',
-            message:     r['message']     ?? '',
+            name:    r['name']    ?? '',
+            type:    (['prefix', 'suffix', 'infix', 'other'].includes(r['type'] ?? ''))
+                         ? r['type'] as Rule['type'] : 'suffix',
+            form:    r['form']    ?? '',
+            meaning: r['meaning'] ?? '',
+            example: r['example'] ?? '',
+            notes:   r['notes']   ?? '',
         }))
-        .filter(r => r.pattern.trim() !== '');
+        .filter(r => r.name.trim() !== '');
 }
 
 function rulesToMd(rules: Rule[]): string {
     return [
         '# Grammar Rules', '',
-        'Patterns are JavaScript regexes tested against each word in the Builder.', '',
-        '- **required** — pattern must match the word (flagged if it doesn\'t)',
-        '- **forbidden** — pattern must not appear in the word (flagged if it does)',
+        'Each rule describes a morphological construction — a prefix, suffix, or other affix.', '',
+        '- **prefix** — added before the word (e.g. on- for past tense)',
+        '- **suffix** — added after the word (e.g. -iu for plural)',
+        '- **infix** — inserted inside the word',
+        '- **other** — freeform rule or particle',
         '',
         buildMdTable(
-            ['description', 'pattern', 'type', 'message'],
-            rules.map(r => [r.description, r.pattern, r.type, r.message])
+            ['name', 'type', 'form', 'meaning', 'example', 'notes'],
+            rules.map(r => [r.name, r.type, r.form, r.meaning, r.example, r.notes])
         ),
     ].join('\n');
+}
+
+// Apply a prefix/suffix rule to a word and return the resulting form
+function applyRule(rule: Rule, word: string): string | null {
+    const affix = rule.form.replace(/^-|-$/g, ''); // strip display dashes
+    if (rule.type === 'prefix') return affix + word;
+    if (rule.type === 'suffix') return word + affix;
+    return null; // infix/other: too complex to auto-apply
 }
 
 // ─── Import parser ────────────────────────────────────────────────────────────
@@ -473,12 +488,12 @@ class RootweaveView extends ItemView {
         el.createEl('p', { cls: 'rw-subtitle', text: 'Type a word to see its root components and check grammar.' });
         const wordInput = el.createEl('input', { cls: 'rw-input rw-input-lg', attr: { type: 'text', placeholder: 'Type a word…' } });
         const suggestEl = el.createEl('div', { cls: 'rw-suggestions' });
-        const violEl    = el.createEl('div', { cls: 'rw-violations' });
+        const formsEl   = el.createEl('div', { cls: 'rw-grammar-forms' });
         const saveArea  = el.createEl('div', { cls: 'rw-add-word-area' });
 
         const analyze = () => {
             const word = wordInput.value.trim();
-            suggestEl.empty(); violEl.empty(); saveArea.empty();
+            suggestEl.empty(); formsEl.empty(); saveArea.empty();
             if (!word) return;
 
             const matched = this.roots.filter(r =>
@@ -500,21 +515,21 @@ class RootweaveView extends ItemView {
                 suggestEl.createEl('p', { cls: 'rw-empty', text: 'No matching roots found.' });
             }
 
-            const violations = this.rules.filter(rule => {
-                try { const hit = new RegExp(rule.pattern, 'i').test(word); return rule.type === 'required' ? !hit : hit; }
-                catch { return false; }
-            });
-
-            if (violations.length) {
-                violEl.createEl('p', { cls: 'rw-label rw-label-warn', text: 'Grammar issues:' });
-                violations.forEach(rule => {
-                    const row = violEl.createEl('div', { cls: 'rw-violation-row' });
-                    row.title = rule.description;
-                    row.createEl('span', { cls: 'rw-violation-icon', text: '⚠ ' });
-                    row.createEl('span', { text: rule.message });
+            // Show each grammar rule applied to this word
+            if (this.rules.length) {
+                formsEl.createEl('p', { cls: 'rw-label', text: 'Grammatical forms:' });
+                this.rules.forEach(rule => {
+                    const result = applyRule(rule, word);
+                    const row = formsEl.createEl('div', { cls: 'rw-form-row' });
+                    row.createEl('span', { cls: `rw-badge rw-badge-${rule.type}`, text: rule.name });
+                    if (result) {
+                        row.createEl('span', { cls: 'rw-form-result', text: result });
+                        row.createEl('span', { cls: 'rw-form-meaning', text: `(${rule.meaning})` });
+                    } else {
+                        row.createEl('span', { cls: 'rw-form-result', text: `${rule.form}  ${word}` });
+                        row.createEl('span', { cls: 'rw-form-meaning', text: `(${rule.meaning} — see Grammar tab)` });
+                    }
                 });
-            } else {
-                violEl.createEl('p', { cls: 'rw-ok', text: '✓ No grammar violations.' });
             }
 
             saveArea.createEl('p', { cls: 'rw-label', text: 'Save to dictionary:' });
@@ -600,16 +615,19 @@ class RootweaveView extends ItemView {
         const list = el.createEl('div', { cls: 'rw-list' });
 
         if (!this.rules.length) {
-            list.createEl('p', { cls: 'rw-empty', text: 'No grammar rules yet.' });
+            list.createEl('p', { cls: 'rw-empty', text: 'No grammar rules yet. Add a suffix, prefix, or other construction.' });
             return;
         }
 
         this.rules.forEach((rule, i) => {
             const card = list.createEl('div', { cls: 'rw-card' });
             const info = card.createEl('div', { cls: 'rw-card-info' });
-            info.createEl('span', { cls: 'rw-root-text', text: rule.description || '(no description)' });
+            info.createEl('span', { cls: 'rw-root-text', text: rule.name });
             info.createEl('span', { cls: `rw-badge rw-badge-${rule.type}`, text: rule.type });
-            card.createEl('div', { cls: 'rw-root-notes', text: `/${rule.pattern}/  →  ${rule.message}` });
+            info.createEl('span', { cls: 'rw-root-chip', text: rule.form });
+            info.createEl('span', { cls: 'rw-root-meaning', text: ` — ${rule.meaning}` });
+            if (rule.example) card.createEl('div', { cls: 'rw-root-notes', text: `e.g. ${rule.example}` });
+            if (rule.notes)   card.createEl('div', { cls: 'rw-root-notes', text: rule.notes });
 
             const acts = card.createEl('div', { cls: 'rw-card-actions' });
             acts.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Edit' })
@@ -807,32 +825,37 @@ class RuleModal extends Modal {
             return wrap.createEl('input', { cls: 'rw-input', attr: { type: 'text', value, placeholder } });
         };
 
-        const descIn    = field('Description',    this.existing?.description ?? '', 'e.g. Words must end in a vowel');
-        const patternIn = field('Pattern (regex)', this.existing?.pattern    ?? '', 'e.g. [aeiou]$');
-        const messageIn = field('Message',         this.existing?.message    ?? '', 'Shown when rule is violated');
+        const nameIn    = field('Name',    this.existing?.name    ?? '', 'e.g. Plural');
+        const formIn    = field('Form',    this.existing?.form    ?? '', 'e.g. -iu  or  on-');
+        const meaningIn = field('Meaning', this.existing?.meaning ?? '', 'e.g. plural marker');
+        const exampleIn = field('Example', this.existing?.example ?? '', 'e.g. vel → veliu (lights)');
+        const notesIn   = field('Notes',   this.existing?.notes   ?? '', 'Optional');
 
         const typeWrap = contentEl.createEl('div', { cls: 'rw-modal-field' });
         typeWrap.createEl('label', { text: 'Type' });
         const typeSel = typeWrap.createEl('select', { cls: 'rw-select' });
-        typeSel.createEl('option', { value: 'required',  text: 'required — pattern must match' });
-        typeSel.createEl('option', { value: 'forbidden', text: 'forbidden — pattern must not match' });
-        if (this.existing?.type === 'forbidden') typeSel.value = 'forbidden';
+        typeSel.createEl('option', { value: 'prefix',  text: 'prefix — added before the word (e.g. on-)' });
+        typeSel.createEl('option', { value: 'suffix',  text: 'suffix — added after the word (e.g. -iu)' });
+        typeSel.createEl('option', { value: 'infix',   text: 'infix — inserted inside the word' });
+        typeSel.createEl('option', { value: 'other',   text: 'other — freeform rule or particle' });
+        if (this.existing?.type) typeSel.value = this.existing.type;
 
         const saveBtn = contentEl.createEl('button', { cls: 'rw-btn rw-btn-primary', text: 'Save' });
         saveBtn.addEventListener('click', () => {
-            const pattern = patternIn.value.trim();
-            if (!pattern) { new Notice('Pattern cannot be empty.'); return; }
-            try { new RegExp(pattern); } catch { new Notice('Invalid regex pattern.'); return; }
+            const name = nameIn.value.trim();
+            if (!name) { new Notice('Name cannot be empty.'); return; }
             this.onSave({
-                description: descIn.value.trim(),
-                pattern,
-                type:    typeSel.value as 'required' | 'forbidden',
-                message: messageIn.value.trim(),
+                name,
+                type:    typeSel.value as Rule['type'],
+                form:    formIn.value.trim(),
+                meaning: meaningIn.value.trim(),
+                example: exampleIn.value.trim(),
+                notes:   notesIn.value.trim(),
             });
             this.close();
         });
 
-        [descIn, patternIn, messageIn].forEach(inp =>
+        [nameIn, formIn, meaningIn, exampleIn, notesIn].forEach(inp =>
             inp.addEventListener('keydown', e => { if (e.key === 'Enter') saveBtn.click(); })
         );
     }

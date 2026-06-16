@@ -287,14 +287,24 @@
 }
 
 /* Grammar rule type badges */
-.rw-badge-required {
+.rw-badge-prefix {
+    background: rgba(59, 130, 246, 0.15);
+    color: var(--color-blue, #3b82f6);
+}
+
+.rw-badge-suffix {
     background: rgba(76, 175, 80, 0.15);
     color: var(--color-green, #4caf50);
 }
 
-.rw-badge-forbidden {
-    background: var(--background-modifier-error, rgba(230, 80, 80, 0.1));
-    color: var(--text-error, #e05252);
+.rw-badge-infix {
+    background: rgba(245, 166, 35, 0.15);
+    color: var(--color-orange, #f5a623);
+}
+
+.rw-badge-other {
+    background: var(--background-modifier-hover);
+    color: var(--text-muted);
 }
 
 /* Alternate form chip (e.g. "via sight") */
@@ -337,28 +347,32 @@
     margin: 5px 0 0 0;
 }
 
-.rw-violations {
-    margin: 4px 0;
+
+/* ── Grammar forms (Builder tab) ───────────────────────────────────────────── */
+
+.rw-grammar-forms {
+    margin: 8px 0 4px;
 }
 
-.rw-violation-row {
+.rw-form-row {
     display: flex;
-    align-items: flex-start;
-    gap: 4px;
-    padding: 4px 8px;
-    background: var(--background-modifier-error, rgba(230, 80, 80, 0.07));
-    border-left: 3px solid var(--text-error, #e05252);
-    border-radius: 0 4px 4px 0;
-    font-size: 0.8em;
-    color: var(--text-error, #e05252);
-    margin-bottom: 3px;
-    cursor: help;
-    line-height: 1.4;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 0.82em;
+    flex-wrap: wrap;
 }
 
-.rw-violation-icon {
-    flex-shrink: 0;
-    margin-top: 0.05em;
+.rw-form-result {
+    font-family: var(--font-monospace);
+    font-weight: 700;
+    color: var(--text-accent);
+}
+
+.rw-form-meaning {
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: 0.9em;
 }
 
 .rw-add-word-area {
