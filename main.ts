@@ -43,7 +43,6 @@ const DICT_FILE    = '.rootweave/Dictionary.md';
 const GRAMMAR_FILE = '.rootweave/Grammar.md';
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
-// No ID fields — the root string and word string are natural unique keys.
 
 interface Root {
     root: string;
@@ -56,12 +55,12 @@ interface DictionaryEntry {
     word: string;
     meaning: string;
     partOfSpeech: string;
-    roots: string[]; // root strings that compose this word, e.g. ["vel", "kar"]
+    roots: string[];
 }
 
 interface GrammarRule {
     description: string;
-    pattern: string;       // JavaScript regex
+    pattern: string;
     ruleType: 'required' | 'forbidden';
     message: string;
 }
@@ -88,18 +87,8 @@ const DEFAULT_GRAMMAR: GrammarRule[] = [
 ];
 
 // ─── Markdown table utilities ─────────────────────────────────────────────────
-//
-// The data files are regular Markdown notes with tables:
-//
-//   | root | meaning   | category | notes |
-//   | ---- | --------- | -------- | ----- |
-//   | vel  | light     | element  |       |
-//   | kar  | fire      | element  |       |
-//
-// These render as nice tables inside Obsidian even without the plugin.
 
 function escapeCell(s: string): string {
-    // Pipe characters inside a Markdown table cell must be escaped as \|
     return (s ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
 }
 
@@ -107,14 +96,8 @@ function unescapeCell(s: string): string {
     return (s ?? '').replace(/\\\|/g, '|');
 }
 
-/**
- * Parse the first Markdown table found in `content` into an array of objects.
- * Ignores any text before or after the table (headings, descriptions, etc.).
- */
 function parseMarkdownTable(content: string): Record<string, string>[] {
     const lines = content.split('\n');
-
-    // Collect the first contiguous block of | lines
     const tableLines: string[] = [];
     let inTable = false;
     for (const line of lines) {
@@ -122,19 +105,11 @@ function parseMarkdownTable(content: string): Record<string, string>[] {
             inTable = true;
             tableLines.push(line.trim());
         } else if (inTable) {
-            break; // first non-pipe line after the table ends it
+            break;
         }
     }
-
-    // Need at least: header row, separator row, one data row
     if (tableLines.length < 3) return [];
-
-    const headers = tableLines[0]
-        .split('|')
-        .slice(1, -1)
-        .map(h => h.trim().toLowerCase());
-
-    // tableLines[1] is the separator (| --- | --- |) — skip it
+    const headers = tableLines[0].split('|').slice(1, -1).map(h => h.trim().toLowerCase());
     return tableLines.slice(2).map(row => {
         const cells = row.split('|').slice(1, -1).map(c => unescapeCell(c.trim()));
         const obj: Record<string, string> = {};
@@ -143,29 +118,24 @@ function parseMarkdownTable(content: string): Record<string, string>[] {
     });
 }
 
-/**
- * Render `rows` as a Markdown table string with auto-padded column widths.
- */
 function buildMarkdownTable(headers: string[], rows: string[][]): string {
     const widths = headers.map((h, i) =>
         Math.max(h.length, ...rows.map(r => (r[i] ?? '').length), 3)
     );
     const pad  = (s: string, w: number) => s.padEnd(w);
     const dash = (w: number) => '-'.repeat(w);
-
     const header  = '| ' + headers.map((h, i) => pad(h, widths[i])).join(' | ') + ' |';
     const sepLine = '| ' + widths.map(dash).join(' | ') + ' |';
     const body    = rows.map(row =>
         '| ' + headers.map((_, i) => pad(escapeCell(row[i] ?? ''), widths[i])).join(' | ') + ' |'
     );
-
     return [header, sepLine, ...body].join('\n');
 }
 
 // ─── Per-type serializers / deserializers ──────────────────────────────────────
 
-const ROOT_HEADERS = ['root', 'meaning', 'category', 'notes'];
-const DICT_HEADERS = ['word', 'meaning', 'part of speech', 'roots'];
+const ROOT_HEADERS    = ['root', 'meaning', 'category', 'notes'];
+const DICT_HEADERS    = ['word', 'meaning', 'part of speech', 'roots'];
 const GRAMMAR_HEADERS = ['description', 'pattern', 'type', 'message'];
 
 function parseRoots(content: string): Root[] {
@@ -193,22 +163,16 @@ function serializeRoots(roots: Root[]): string {
 function parseDictionary(content: string): DictionaryEntry[] {
     return parseMarkdownTable(content)
         .map(row => ({
-            word:        row['word']           ?? '',
-            meaning:     row['meaning']        ?? '',
-            partOfSpeech: row['part of speech'] ?? '',
-            // roots are stored as "+ "-separated strings, e.g. "vel + kar"
+            word:         row['word']            ?? '',
+            meaning:      row['meaning']         ?? '',
+            partOfSpeech: row['part of speech']  ?? '',
             roots: (row['roots'] ?? '').split('+').map(r => r.trim()).filter(Boolean),
         }))
         .filter(e => e.word.trim() !== '');
 }
 
 function serializeDictionary(dict: DictionaryEntry[]): string {
-    const rows = dict.map(e => [
-        e.word,
-        e.meaning,
-        e.partOfSpeech,
-        e.roots.join(' + '),
-    ]);
+    const rows = dict.map(e => [e.word, e.meaning, e.partOfSpeech, e.roots.join(' + ')]);
     return [
         '# Dictionary',
         '',
@@ -219,11 +183,12 @@ function serializeDictionary(dict: DictionaryEntry[]): string {
 }
 
 function parseGrammar(content: string): GrammarRule[] {
+    // Explicit return type on the map callback so TS doesn't widen the ternary result to `string`
     return parseMarkdownTable(content)
-        .map(row => ({
+        .map((row): GrammarRule => ({
             description: row['description'] ?? '',
             pattern:     row['pattern']     ?? '',
-            ruleType:    (row['type'] === 'forbidden' ? 'forbidden' : 'required') as 'required' | 'forbidden',
+            ruleType:    row['type'] === 'forbidden' ? 'forbidden' : 'required',
             message:     row['message']     ?? '',
         }))
         .filter(r => r.pattern.trim() !== '');
@@ -234,9 +199,9 @@ function serializeGrammar(rules: GrammarRule[]): string {
     return [
         '# Grammar Rules',
         '',
-        'Patterns are JavaScript regular expressions tested against each word in the Builder.',
+        "Patterns are JavaScript regular expressions tested against each word in the Builder.",
         '',
-        '- **required** — the pattern must match the word (flagged if it doesn\'t)',
+        "- **required** — the pattern must match the word (flagged if it doesn't)",
         '- **forbidden** — the pattern must not appear in the word (flagged if it does)',
         '',
         buildMarkdownTable(GRAMMAR_HEADERS, rows),
@@ -251,24 +216,25 @@ export default class RootweavePlugin extends Plugin {
     async onload() {
         await this.loadSettings();
 
-        // Register the sidebar view type.
-        // Obsidian calls the factory function whenever it needs to create the view.
         this.registerView(VIEW_TYPE, (leaf) => new RootweaveView(leaf, this));
 
-        this.addRibbonIcon('book-open', 'Rootweave', () => this.activateView());
+        // void: ribbon callback is typed () => any, activateView() is async
+        this.addRibbonIcon('book-open', 'Rootweave', () => { void this.activateView(); });
 
         this.addCommand({
-            id: 'open-rootweave',
-            name: 'Open Rootweave Panel',
-            callback: () => this.activateView(),
+            // Don't include the plugin ID in the command ID — Obsidian adds it automatically
+            id: 'open',
+            // Don't include the plugin name in the command name — it's shown separately in the UI
+            name: 'Open panel',
+            callback: () => { void this.activateView(); },
         });
 
         this.addSettingTab(new RootweaveSettingTab(this.app, this));
     }
 
-    onunload() {
-        this.app.workspace.detachLeavesOfType(VIEW_TYPE);
-    }
+    // Don't call detachLeavesOfType here — Obsidian handles leaf cleanup automatically
+    // and calling it resets the leaf to its default position even if the user moved it.
+    onunload() { /* intentionally empty */ }
 
     async activateView() {
         const { workspace } = this.app;
@@ -280,27 +246,24 @@ export default class RootweavePlugin extends Plugin {
                 leaf = rightLeaf;
             }
         }
-        if (leaf) workspace.revealLeaf(leaf);
+        // revealLeaf returns Promise<void> in modern Obsidian — mark as intentionally floating
+        if (leaf) void workspace.revealLeaf(leaf);
     }
 
     // ── Vault I/O ──────────────────────────────────────────────────────────────
 
-    /** Read a file's raw text, or null if it doesn't exist yet */
     async readMd(path: string): Promise<string | null> {
         const file = this.app.vault.getAbstractFileByPath(normalizePath(path));
         if (!(file instanceof TFile)) return null;
         return this.app.vault.read(file);
     }
 
-    /** Write text to a file, creating the file and its parent folder if needed */
     async writeMd(path: string, content: string): Promise<void> {
         const normalPath = normalizePath(path);
         const dir = normalPath.split('/').slice(0, -1).join('/');
-
         if (dir && !this.app.vault.getAbstractFileByPath(dir)) {
             await this.app.vault.createFolder(dir);
         }
-
         const existing = this.app.vault.getAbstractFileByPath(normalPath);
         if (existing instanceof TFile) {
             await this.app.vault.modify(existing, content);
@@ -315,38 +278,27 @@ export default class RootweavePlugin extends Plugin {
         const content = await this.readMd(ROOTS_FILE);
         return content ? parseRoots(content) : [];
     }
-
-    async saveRoots(roots: Root[]): Promise<void> {
-        await this.writeMd(ROOTS_FILE, serializeRoots(roots));
-    }
+    async saveRoots(roots: Root[]): Promise<void> { await this.writeMd(ROOTS_FILE, serializeRoots(roots)); }
 
     async loadDictionary(): Promise<DictionaryEntry[]> {
         const content = await this.readMd(DICT_FILE);
         return content ? parseDictionary(content) : [];
     }
-
-    async saveDictionary(dict: DictionaryEntry[]): Promise<void> {
-        await this.writeMd(DICT_FILE, serializeDictionary(dict));
-    }
+    async saveDictionary(dict: DictionaryEntry[]): Promise<void> { await this.writeMd(DICT_FILE, serializeDictionary(dict)); }
 
     async loadGrammar(): Promise<GrammarRule[]> {
         const content = await this.readMd(GRAMMAR_FILE);
         return content ? parseGrammar(content) : DEFAULT_GRAMMAR;
     }
-
-    async saveGrammar(rules: GrammarRule[]): Promise<void> {
-        await this.writeMd(GRAMMAR_FILE, serializeGrammar(rules));
-    }
+    async saveGrammar(rules: GrammarRule[]): Promise<void> { await this.writeMd(GRAMMAR_FILE, serializeGrammar(rules)); }
 
     // ── Plugin settings ────────────────────────────────────────────────────────
 
     async loadSettings() {
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+        // loadData() returns any — cast to a partial shape before merging
+        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<RootweaveSettings>);
     }
-
-    async saveSettings() {
-        await this.saveData(this.settings);
-    }
+    async saveSettings() { await this.saveData(this.settings); }
 }
 
 // ─── Sidebar View ─────────────────────────────────────────────────────────────
@@ -354,7 +306,6 @@ export default class RootweavePlugin extends Plugin {
 class RootweaveView extends ItemView {
     plugin: RootweavePlugin;
     private activeTab: 'roots' | 'builder' | 'dictionary' | 'translator' | 'export' = 'roots';
-
     private roots: Root[] = [];
     private dictionary: DictionaryEntry[] = [];
     private grammar: GrammarRule[] = [];
@@ -374,19 +325,14 @@ class RootweaveView extends ItemView {
             this.plugin.loadDictionary(),
             this.plugin.loadGrammar(),
         ]);
-
-        // Write Grammar.md on first launch so it exists and is self-documenting
         const grammarFile = this.app.vault.getAbstractFileByPath(normalizePath(GRAMMAR_FILE));
         if (!grammarFile) await this.plugin.saveGrammar(this.grammar);
-
         this.render();
     }
 
-    async onClose() { /* nothing to tear down */ }
+    async onClose(): Promise<void> { /* nothing to tear down */ }
 
-    /** Full re-render. Simple and correct for a panel this size. */
     private render() {
-        // this.contentEl is the official Obsidian API property for the view's content area.
         const container = this.contentEl;
         container.empty();
         container.addClass('rootweave-container');
@@ -429,9 +375,11 @@ class RootweaveView extends ItemView {
     private renderRootsTab(el: HTMLElement) {
         const controls = el.createEl('div', { cls: 'rw-controls' });
 
+        // Use attr: {} for HTML attributes that aren't in DomElementInfo directly
         const searchInput = controls.createEl('input', {
-            cls: 'rw-input', type: 'text', placeholder: 'Search roots…',
-        } as any);
+            cls: 'rw-input',
+            attr: { type: 'text', placeholder: 'Search roots…' },
+        });
 
         const categories = ['All', ...new Set(this.roots.map(r => r.category).filter(Boolean))];
         const catSelect  = controls.createEl('select', { cls: 'rw-select' });
@@ -439,14 +387,14 @@ class RootweaveView extends ItemView {
 
         const addBtn = controls.createEl('button', { cls: 'rw-btn rw-btn-primary', text: '+ Add Root' });
         addBtn.addEventListener('click', () => {
-            new RootModal(this.app, null, async (newRoot) => {
+            new RootModal(this.app, null, (newRoot) => {
                 if (this.roots.some(r => r.root === newRoot.root)) {
                     new Notice(`Root "${newRoot.root}" already exists.`);
                     return;
                 }
                 this.roots.push(newRoot);
-                await this.plugin.saveRoots(this.roots);
-                this.render();
+                // void: fire-and-forget save, render after it completes
+                void this.plugin.saveRoots(this.roots).then(() => this.render());
             }).open();
         });
 
@@ -462,8 +410,7 @@ class RootweaveView extends ItemView {
                     || r.root.toLowerCase().includes(query)
                     || r.meaning.toLowerCase().includes(query)
                     || r.notes.toLowerCase().includes(query);
-                const matchCat = cat === 'All' || r.category === cat;
-                return matchSearch && matchCat;
+                return matchSearch && (cat === 'All' || r.category === cat);
             });
 
             if (filtered.length === 0) {
@@ -483,20 +430,17 @@ class RootweaveView extends ItemView {
 
                 const editBtn = actions.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Edit' });
                 editBtn.addEventListener('click', () => {
-                    new RootModal(this.app, root, async (updated) => {
-                        // Find by the original root string (before the edit)
+                    new RootModal(this.app, root, (updated) => {
                         const idx = this.roots.findIndex(r => r.root === root.root);
                         if (idx !== -1) this.roots[idx] = updated;
-                        await this.plugin.saveRoots(this.roots);
-                        this.render();
+                        void this.plugin.saveRoots(this.roots).then(() => this.render());
                     }).open();
                 });
 
                 const delBtn = actions.createEl('button', { cls: 'rw-btn rw-btn-sm rw-btn-danger', text: 'Delete' });
-                delBtn.addEventListener('click', async () => {
+                delBtn.addEventListener('click', () => {
                     this.roots = this.roots.filter(r => r.root !== root.root);
-                    await this.plugin.saveRoots(this.roots);
-                    this.render();
+                    void this.plugin.saveRoots(this.roots).then(() => this.render());
                 });
             });
         };
@@ -514,8 +458,9 @@ class RootweaveView extends ItemView {
         el.createEl('p', { cls: 'rw-subtitle', text: 'Type a word to see its root components and grammar check.' });
 
         const wordInput = el.createEl('input', {
-            cls: 'rw-input rw-input-lg', type: 'text', placeholder: 'Type a word…',
-        } as any);
+            cls: 'rw-input rw-input-lg',
+            attr: { type: 'text', placeholder: 'Type a word…' },
+        });
 
         const suggestionsEl = el.createEl('div', { cls: 'rw-suggestions' });
         const violationsEl  = el.createEl('div', { cls: 'rw-violations' });
@@ -528,7 +473,6 @@ class RootweaveView extends ItemView {
             addWordArea.empty();
             if (!word) return;
 
-            // ── Root matching ─────────────────────────────────────────────────
             const matchedRoots = this.roots.filter(
                 r => r.root.length > 0 && word.toLowerCase().includes(r.root.toLowerCase())
             );
@@ -541,13 +485,14 @@ class RootweaveView extends ItemView {
                     row.createEl('span', { text: ` → ${root.meaning}` });
                     if (root.category) row.createEl('span', { cls: 'rw-badge rw-badge-sm', text: root.category });
                 });
-                const hint = matchedRoots.map(r => r.meaning).join(' + ');
-                suggestionsEl.createEl('p', { cls: 'rw-meaning-hint', text: `Composed meaning: ${hint}` });
+                suggestionsEl.createEl('p', {
+                    cls: 'rw-meaning-hint',
+                    text: `Composed meaning: ${matchedRoots.map(r => r.meaning).join(' + ')}`,
+                });
             } else {
                 suggestionsEl.createEl('p', { cls: 'rw-empty', text: 'No matching roots found.' });
             }
 
-            // ── Grammar rule checker ──────────────────────────────────────────
             const violations = this.grammar.filter(rule => {
                 try {
                     const hit = new RegExp(rule.pattern, 'i').test(word);
@@ -567,19 +512,20 @@ class RootweaveView extends ItemView {
                 violationsEl.createEl('p', { cls: 'rw-ok', text: '✓ No grammar violations.' });
             }
 
-            // ── Add to dictionary ─────────────────────────────────────────────
             addWordArea.createEl('p', { cls: 'rw-label', text: 'Save to dictionary:' });
             const form = addWordArea.createEl('div', { cls: 'rw-add-word-form' });
 
             const meaningInput = form.createEl('input', {
-                cls: 'rw-input', type: 'text', placeholder: 'English meaning',
-            } as any);
+                cls: 'rw-input',
+                attr: { type: 'text', placeholder: 'English meaning' },
+            });
             const posInput = form.createEl('input', {
-                cls: 'rw-input', type: 'text', placeholder: 'Part of speech (noun, verb…)',
-            } as any);
+                cls: 'rw-input',
+                attr: { type: 'text', placeholder: 'Part of speech (noun, verb…)' },
+            });
 
             const saveBtn = form.createEl('button', { cls: 'rw-btn rw-btn-primary', text: 'Add to Dictionary' });
-            saveBtn.addEventListener('click', async () => {
+            saveBtn.addEventListener('click', () => {
                 const meaning = meaningInput.value.trim();
                 if (!meaning) { new Notice('Please enter a meaning.'); return; }
                 if (this.dictionary.some(e => e.word.toLowerCase() === word.toLowerCase())) {
@@ -592,10 +538,11 @@ class RootweaveView extends ItemView {
                     roots: matchedRoots.map(r => r.root),
                 };
                 this.dictionary.push(entry);
-                await this.plugin.saveDictionary(this.dictionary);
-                new Notice(`"${word}" added to dictionary!`);
-                wordInput.value = '';
-                analyze();
+                void this.plugin.saveDictionary(this.dictionary).then(() => {
+                    new Notice(`"${word}" added to dictionary!`);
+                    wordInput.value = '';
+                    analyze();
+                });
             });
         };
 
@@ -609,8 +556,9 @@ class RootweaveView extends ItemView {
     private renderDictionaryTab(el: HTMLElement) {
         const controls = el.createEl('div', { cls: 'rw-controls' });
         const searchInput = controls.createEl('input', {
-            cls: 'rw-input', type: 'text', placeholder: 'Search dictionary…',
-        } as any);
+            cls: 'rw-input',
+            attr: { type: 'text', placeholder: 'Search dictionary…' },
+        });
 
         const listEl = el.createEl('div', { cls: 'rw-dict-list' });
 
@@ -649,10 +597,9 @@ class RootweaveView extends ItemView {
                 const delBtn = row.createEl('td')
                     .createEl('button', { cls: 'rw-btn rw-btn-sm rw-btn-danger', text: '×' });
                 delBtn.title = 'Remove from dictionary';
-                delBtn.addEventListener('click', async () => {
+                delBtn.addEventListener('click', () => {
                     this.dictionary = this.dictionary.filter(e2 => e2.word !== entry.word);
-                    await this.plugin.saveDictionary(this.dictionary);
-                    renderList();
+                    void this.plugin.saveDictionary(this.dictionary).then(() => renderList());
                 });
             });
         };
@@ -669,11 +616,13 @@ class RootweaveView extends ItemView {
         el.createEl('p', { cls: 'rw-subtitle', text: 'Translate English → your conlang using the dictionary.' });
 
         const inputArea = el.createEl('textarea', {
-            cls: 'rw-textarea', placeholder: 'Type an English sentence here…',
-        } as any);
+            cls: 'rw-textarea',
+            attr: { placeholder: 'Type an English sentence here…' },
+        });
 
         const glossLabel = el.createEl('label', { cls: 'rw-toggle-label' });
-        const glossCheck = glossLabel.createEl('input') as HTMLInputElement;
+        // createEl('input') already returns HTMLInputElement — no cast needed
+        const glossCheck = glossLabel.createEl('input');
         glossCheck.type  = 'checkbox';
         glossLabel.appendText(' Show interlinear gloss');
 
@@ -685,16 +634,13 @@ class RootweaveView extends ItemView {
             const sentence = inputArea.value.trim();
             if (!sentence) return;
 
-            const tokens = sentence.split(/\s+/);
-
+            const tokens  = sentence.split(/\s+/);
             const results = tokens.map(token => {
                 const m      = token.match(/^([^a-zA-Z]*)([a-zA-Z]*)([^a-zA-Z]*)$/);
                 const prefix = m?.[1] ?? '';
                 const word   = m?.[2] ?? token;
                 const suffix = m?.[3] ?? '';
-
-                // Look up English word in dictionary meanings (split by comma/semicolon/slash)
-                const entry = this.dictionary.find(e =>
+                const entry  = this.dictionary.find(e =>
                     e.meaning.toLowerCase().split(/[\s,;/]+/).some(
                         part => part.trim() === word.toLowerCase()
                     )
@@ -703,7 +649,6 @@ class RootweaveView extends ItemView {
             });
 
             if (glossCheck.checked) {
-                // ── Interlinear gloss (original on top, translation below) ────
                 const glossEl  = outputEl.createEl('div', { cls: 'rw-gloss' });
                 const origRow  = glossEl.createEl('div', { cls: 'rw-gloss-row rw-gloss-original' });
                 const transRow = glossEl.createEl('div', { cls: 'rw-gloss-row rw-gloss-translation' });
@@ -723,7 +668,6 @@ class RootweaveView extends ItemView {
                     }
                 });
             } else {
-                // ── Inline translation ────────────────────────────────────────
                 const lineEl = outputEl.createEl('div', { cls: 'rw-translation-line' });
                 results.forEach(({ prefix, word, suffix, entry }, i) => {
                     if (i > 0) lineEl.appendText(' ');
@@ -739,13 +683,13 @@ class RootweaveView extends ItemView {
                 });
             }
 
-            // Copy button
             const copyBtn = outputEl.createEl('button', { cls: 'rw-btn rw-btn-sm rw-copy-btn', text: 'Copy' });
             copyBtn.addEventListener('click', () => {
                 const text = results
                     .map(({ prefix, word, suffix, entry }) => prefix + (entry ? entry.word : word) + suffix)
                     .join(' ');
-                navigator.clipboard.writeText(text);
+                // Clipboard access is user-initiated (explicit button click) — intentionally floating
+                void navigator.clipboard.writeText(text);
                 new Notice('Translation copied!');
             });
         });
@@ -774,10 +718,10 @@ class RootweaveView extends ItemView {
                 cls: 'rw-btn rw-btn-sm rw-file-link',
                 text: filePath.split('/').pop() ?? filePath,
             });
-            btn.addEventListener('click', async () => {
+            btn.addEventListener('click', () => {
                 const file = this.app.vault.getAbstractFileByPath(normalizePath(filePath));
                 if (file instanceof TFile) {
-                    await this.app.workspace.getLeaf().openFile(file);
+                    void this.app.workspace.getLeaf().openFile(file);
                 } else {
                     new Notice(`${filePath} hasn't been created yet — add some data first.`);
                 }
@@ -787,11 +731,10 @@ class RootweaveView extends ItemView {
         el.createEl('div', { cls: 'rw-divider' });
 
         const exportBtn = el.createEl('button', { cls: 'rw-btn rw-btn-primary', text: 'Export Consolidated Snapshot' });
-        exportBtn.addEventListener('click', async () => {
-            const langName = this.plugin.settings.language;
-            const date     = new Date().toISOString().slice(0, 10);
-
-            const lines: string[] = [
+        exportBtn.addEventListener('click', () => {
+            const langName   = this.plugin.settings.language;
+            const date       = new Date().toISOString().slice(0, 10);
+            const content    = [
                 `# ${langName} — ${date}`,
                 '',
                 serializeRoots(this.roots),
@@ -799,19 +742,14 @@ class RootweaveView extends ItemView {
                 serializeDictionary(this.dictionary),
                 '',
                 serializeGrammar(this.grammar),
-            ];
-
-            const filename    = `${langName.replace(/\s+/g, '-').toLowerCase()}-${date}.md`;
-            const normalPath  = normalizePath(filename);
-            const existing    = this.app.vault.getAbstractFileByPath(normalPath);
-
-            if (existing instanceof TFile) {
-                await this.app.vault.modify(existing, lines.join('\n'));
-            } else {
-                await this.app.vault.create(normalPath, lines.join('\n'));
-            }
-
-            new Notice(`Exported to ${filename}`);
+            ].join('\n');
+            const filename   = `${langName.replace(/\s+/g, '-').toLowerCase()}-${date}.md`;
+            const normalPath = normalizePath(filename);
+            const existing   = this.app.vault.getAbstractFileByPath(normalPath);
+            const save       = existing instanceof TFile
+                ? this.app.vault.modify(existing, content)
+                : this.app.vault.create(normalPath, content);
+            void save.then(() => new Notice(`Exported to ${filename}`));
         });
     }
 }
@@ -832,12 +770,14 @@ class RootModal extends Modal {
         const { contentEl } = this;
         contentEl.createEl('h2', { text: this.existing ? 'Edit Root' : 'Add Root' });
 
+        // Helper that builds a labeled input row using attr: {} (no type assertions needed)
         const field = (label: string, value: string, placeholder: string): HTMLInputElement => {
             const wrapper = contentEl.createEl('div', { cls: 'rw-modal-field' });
             wrapper.createEl('label', { text: label });
             return wrapper.createEl('input', {
-                cls: 'rw-input', type: 'text', value, placeholder,
-            } as any) as HTMLInputElement;
+                cls: 'rw-input',
+                attr: { type: 'text', value, placeholder },
+            });
         };
 
         const rootInput     = field('Root',     this.existing?.root     ?? '', 'e.g. "vel"');
@@ -879,7 +819,9 @@ class RootweaveSettingTab extends PluginSettingTab {
     display() {
         const { containerEl } = this;
         containerEl.empty();
-        containerEl.createEl('h2', { text: 'Rootweave' });
+
+        // Use setHeading() instead of createEl('h2') for consistent settings UI
+        new Setting(containerEl).setName('Rootweave').setHeading();
 
         new Setting(containerEl)
             .setName('Language name')
@@ -888,9 +830,9 @@ class RootweaveSettingTab extends PluginSettingTab {
                 text
                     .setPlaceholder('My Conlang')
                     .setValue(this.plugin.settings.language)
-                    .onChange(async value => {
+                    .onChange(value => {
                         this.plugin.settings.language = value;
-                        await this.plugin.saveSettings();
+                        void this.plugin.saveSettings();
                     })
             );
 
@@ -898,10 +840,10 @@ class RootweaveSettingTab extends PluginSettingTab {
             .setName('Grammar rules')
             .setDesc('Stored in .rootweave/Grammar.md — open it to add or edit rules.')
             .addButton(btn =>
-                btn.setButtonText('Open Grammar.md').onClick(async () => {
+                btn.setButtonText('Open Grammar.md').onClick(() => {
                     const file = this.app.vault.getAbstractFileByPath(normalizePath(GRAMMAR_FILE));
                     if (file instanceof TFile) {
-                        await this.app.workspace.getLeaf().openFile(file);
+                        void this.app.workspace.getLeaf().openFile(file);
                     } else {
                         new Notice('Open the Rootweave panel first to create Grammar.md.');
                     }

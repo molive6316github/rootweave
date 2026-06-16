@@ -435,7 +435,9 @@
 /* Unknown word: red with wavy underline */
 .rw-word-missing {
     color: var(--text-error, #e05252);
-    text-decoration: underline wavy var(--text-error, #e05252);
+    text-decoration-line: underline;
+    text-decoration-style: wavy;
+    text-decoration-color: var(--text-error, #e05252);
     cursor: help;
 }
 

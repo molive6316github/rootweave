@@ -52,3 +52,6 @@ console.log(`   git add package.json manifest.json versions.json`);
 console.log(`   git commit -m "chore: bump to ${newVersion}"`);
 console.log(`   git tag -a ${newVersion} -m "${newVersion}"`);
 console.log(`   git push --follow-tags`);
+console.log(`\n⚠️   Tag must NOT start with "v" — Obsidian matches tags to manifest.json exactly.`);
+console.log(`    ✓ correct:   ${newVersion}`);
+console.log(`    ✗ incorrect: v${newVersion}`);

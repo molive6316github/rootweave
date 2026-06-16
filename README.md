@@ -30,14 +30,14 @@ Built for [Hack Club Stardance](https://hackclub.com).
 
 ### Manual install (developer mode)
 
-1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/yourusername/rootweave/releases/latest)
+1. Download `main.js`, `manifest.json`, and `styles.css` from the [latest release](https://github.com/molive6316github/rootweave/releases/latest)
 2. Copy them into `<vault>/.obsidian/plugins/rootweave/`
 3. Reload Obsidian and enable the plugin under **Settings → Community plugins**
 
 ### From source
 
 ```bash
-git clone https://github.com/yourusername/rootweave.git
+git clone https://github.com/molive6316github/rootweave.git
 cd rootweave
 npm install
 npm run install-plugin   # detects your vault automatically
@@ -139,9 +139,9 @@ Follow these steps once to get the plugin listed in Obsidian's built-in browser.
    {
      "id": "rootweave",
      "name": "Rootweave",
-     "author": "Your Name",
+     "author": "Max Oliver",
      "description": "A conlang workspace for worldbuilders — manage roots, build words, validate grammar, and translate.",
-     "repo": "yourusername/rootweave"
+     "repo": "molive6316github/rootweave"
    }
    ```
    Insert it in **alphabetical order by `id`**.
