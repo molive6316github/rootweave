@@ -49,6 +49,7 @@ interface Root {
     meaning: string;
     category: string;
     notes: string;
+    alternates: string[]; // other forms of the same root, e.g. "sight" for root "see"
 }
 
 interface DictionaryEntry {
@@ -134,23 +135,24 @@ function buildMarkdownTable(headers: string[], rows: string[][]): string {
 
 // ─── Per-type serializers / deserializers ──────────────────────────────────────
 
-const ROOT_HEADERS    = ['root', 'meaning', 'category', 'notes'];
+const ROOT_HEADERS    = ['root', 'meaning', 'category', 'notes', 'alternates'];
 const DICT_HEADERS    = ['word', 'meaning', 'part of speech', 'roots'];
 const GRAMMAR_HEADERS = ['description', 'pattern', 'type', 'message'];
 
 function parseRoots(content: string): Root[] {
     return parseMarkdownTable(content)
         .map(row => ({
-            root:     row['root']     ?? '',
-            meaning:  row['meaning']  ?? '',
-            category: row['category'] ?? '',
-            notes:    row['notes']    ?? '',
+            root:       row['root']     ?? '',
+            meaning:    row['meaning']  ?? '',
+            category:   row['category'] ?? '',
+            notes:      row['notes']    ?? '',
+            alternates: (row['alternates'] ?? '').split(',').map(s => s.trim()).filter(Boolean),
         }))
         .filter(r => r.root.trim() !== '');
 }
 
 function serializeRoots(roots: Root[]): string {
-    const rows = roots.map(r => [r.root, r.meaning, r.category, r.notes]);
+    const rows = roots.map(r => [r.root, r.meaning, r.category, r.notes, r.alternates.join(', ')]);
     return [
         '# Root Lexicon',
         '',
@@ -245,8 +247,17 @@ function buildImportParser(
     }
 }
 
+// Mirror the capitalisation pattern of the source word onto the translated word.
+// "Hello" → capitalise first letter. "HELLO" → all caps. "hello" → leave as-is.
+function applyCapitalization(source: string, target: string): string {
+    if (!source || !target) return target;
+    if (/[A-Z]/.test(source) && source === source.toUpperCase()) return target.toUpperCase();
+    if (/^[A-Z]/.test(source)) return target[0].toUpperCase() + target.slice(1);
+    return target;
+}
+
 function parseImportRoots(template: string, rawText: string): Root[] {
-    const parser = buildImportParser(template, ['root', 'meaning', 'category', 'notes']);
+    const parser = buildImportParser(template, ['root', 'meaning', 'category', 'notes', 'alternates']);
     if (!parser) return [];
     return rawText
         .split('\n')
@@ -258,7 +269,13 @@ function parseImportRoots(template: string, rawText: string): Root[] {
             const d: Record<string, string> = {};
             parser.fieldOrder.forEach((f, i) => { d[f] = m[i + 1].trim(); });
             if (!d['root']) return [];
-            return [{ root: d['root'], meaning: d['meaning'] ?? '', category: d['category'] ?? '', notes: d['notes'] ?? '' }];
+            return [{
+                root:       d['root'],
+                meaning:    d['meaning']    ?? '',
+                category:   d['category']   ?? '',
+                notes:      d['notes']      ?? '',
+                alternates: d['alternates'] ? d['alternates'].split(/[,/]/).map(s => s.trim()).filter(Boolean) : [],
+            }];
         });
 }
 
@@ -504,6 +521,8 @@ class RootweaveView extends ItemView {
                 const card = listEl.createEl('div', { cls: 'rw-card' });
                 const info = card.createEl('div', { cls: 'rw-card-info' });
                 info.createEl('span', { cls: 'rw-root-text',    text: root.root });
+                if (root.alternates.length > 0)
+                    info.createEl('span', { cls: 'rw-root-alts', text: ` / ${root.alternates.join(' / ')}` });
                 info.createEl('span', { cls: 'rw-root-meaning', text: ` — ${root.meaning}` });
                 if (root.category) info.createEl('span', { cls: 'rw-badge', text: root.category });
                 if (root.notes)    card.createEl('div', { cls: 'rw-root-notes', text: root.notes });
@@ -555,8 +574,8 @@ class RootweaveView extends ItemView {
             addWordArea.empty();
             if (!word) return;
 
-            const matchedRoots = this.roots.filter(
-                r => r.root.length > 0 && word.toLowerCase().includes(r.root.toLowerCase())
+            const matchedRoots = this.roots.filter(r =>
+                [r.root, ...r.alternates].some(f => f.length > 0 && word.toLowerCase().includes(f.toLowerCase()))
             );
 
             if (matchedRoots.length > 0) {
@@ -564,6 +583,9 @@ class RootweaveView extends ItemView {
                 matchedRoots.forEach(root => {
                     const row = suggestionsEl.createEl('div', { cls: 'rw-suggestion-row' });
                     row.createEl('span', { cls: 'rw-root-chip', text: root.root });
+                    // Show which alternate form was matched (if it wasn't the root itself)
+                    const matchedAlt = root.alternates.find(f => f.length > 0 && word.toLowerCase().includes(f.toLowerCase()));
+                    if (matchedAlt) row.createEl('span', { cls: 'rw-alt-chip', text: `via "${matchedAlt}"` });
                     row.createEl('span', { text: ` → ${root.meaning}` });
                     if (root.category) row.createEl('span', { cls: 'rw-badge rw-badge-sm', text: root.category });
                 });
@@ -727,7 +749,9 @@ class RootweaveView extends ItemView {
                         part => part.trim() === word.toLowerCase()
                     )
                 );
-                return { prefix, word, suffix, entry };
+                // Mirror capitalisation: "Hello" → capitalised, "HELLO" → ALL CAPS
+                const translated = entry ? applyCapitalization(word, entry.word) : null;
+                return { prefix, word, suffix, entry, translated };
             });
 
             if (glossCheck.checked) {
@@ -735,13 +759,13 @@ class RootweaveView extends ItemView {
                 const origRow  = glossEl.createEl('div', { cls: 'rw-gloss-row rw-gloss-original' });
                 const transRow = glossEl.createEl('div', { cls: 'rw-gloss-row rw-gloss-translation' });
 
-                results.forEach(({ prefix, word, suffix, entry }) => {
+                results.forEach(({ prefix, word, suffix, translated }) => {
                     const origCell  = origRow.createEl('span',  { cls: 'rw-gloss-cell', text: prefix + word + suffix });
                     const transCell = transRow.createEl('span', { cls: 'rw-gloss-cell' });
-                    if (entry) {
-                        transCell.setText(entry.word);
+                    if (translated) {
+                        transCell.setText(translated);
                         transCell.addClass('rw-gloss-found');
-                        origCell.title = `→ ${entry.word}`;
+                        origCell.title = `→ ${translated}`;
                     } else {
                         transCell.setText('?');
                         transCell.addClass('rw-gloss-missing');
@@ -751,12 +775,12 @@ class RootweaveView extends ItemView {
                 });
             } else {
                 const lineEl = outputEl.createEl('div', { cls: 'rw-translation-line' });
-                results.forEach(({ prefix, word, suffix, entry }, i) => {
+                results.forEach(({ prefix, word, suffix, entry, translated }, i) => {
                     if (i > 0) lineEl.appendText(' ');
                     if (prefix) lineEl.appendText(prefix);
-                    if (entry) {
-                        const span = lineEl.createEl('span', { cls: 'rw-word-found', text: entry.word });
-                        span.title = `${word} → ${entry.meaning}`;
+                    if (translated) {
+                        const span = lineEl.createEl('span', { cls: 'rw-word-found', text: translated });
+                        span.title = `${word} → ${entry?.meaning ?? ''}`;
                     } else {
                         const span = lineEl.createEl('span', { cls: 'rw-word-missing', text: word });
                         span.title = 'No dictionary entry found';
@@ -768,7 +792,7 @@ class RootweaveView extends ItemView {
             const copyBtn = outputEl.createEl('button', { cls: 'rw-btn rw-btn-sm rw-copy-btn', text: 'Copy' });
             copyBtn.addEventListener('click', () => {
                 const text = results
-                    .map(({ prefix, word, suffix, entry }) => prefix + (entry ? entry.word : word) + suffix)
+                    .map(({ prefix, word, suffix, translated }) => prefix + (translated ?? word) + suffix)
                     .join(' ');
                 // Clipboard access is user-initiated (explicit button click) — intentionally floating
                 void navigator.clipboard.writeText(text);
@@ -862,25 +886,27 @@ class RootModal extends Modal {
             });
         };
 
-        const rootInput     = field('Root',     this.existing?.root     ?? '', 'e.g. "vel"');
-        const meaningInput  = field('Meaning',  this.existing?.meaning  ?? '', 'e.g. "light, clarity"');
-        const categoryInput = field('Category', this.existing?.category ?? '', 'e.g. "element", "emotion"');
-        const notesInput    = field('Notes',    this.existing?.notes    ?? '', 'Optional');
+        const rootInput     = field('Root',       this.existing?.root                      ?? '', 'e.g. "vel"');
+        const altsInput     = field('Alternates', this.existing?.alternates.join(', ')     ?? '', 'e.g. "sight, saw" — comma-separated');
+        const meaningInput  = field('Meaning',    this.existing?.meaning                   ?? '', 'e.g. "light, clarity"');
+        const categoryInput = field('Category',   this.existing?.category                  ?? '', 'e.g. "element", "emotion"');
+        const notesInput    = field('Notes',      this.existing?.notes                     ?? '', 'Optional');
 
         const saveBtn = contentEl.createEl('button', { cls: 'rw-btn rw-btn-primary', text: 'Save' });
         saveBtn.addEventListener('click', () => {
             const rootVal = rootInput.value.trim();
             if (!rootVal) { new Notice('Root cannot be empty.'); return; }
             this.onSave({
-                root:     rootVal,
-                meaning:  meaningInput.value.trim(),
-                category: categoryInput.value.trim(),
-                notes:    notesInput.value.trim(),
+                root:       rootVal,
+                alternates: altsInput.value.split(',').map(s => s.trim()).filter(Boolean),
+                meaning:    meaningInput.value.trim(),
+                category:   categoryInput.value.trim(),
+                notes:      notesInput.value.trim(),
             });
             this.close();
         });
 
-        [rootInput, meaningInput, categoryInput, notesInput].forEach(inp =>
+        [rootInput, altsInput, meaningInput, categoryInput, notesInput].forEach(inp =>
             inp.addEventListener('keydown', e => { if (e.key === 'Enter') saveBtn.click(); })
         );
     }
@@ -933,10 +959,8 @@ class RootweaveSettingTab extends PluginSettingTab {
         new Setting(containerEl).setName('Import').setHeading();
 
         let importType: 'roots' | 'words' = 'roots';
-        let importTemplate = '[root] [meaning]';
-        let importData = '';
 
-        const ROOT_TOKENS = 'Tokens: [root], [meaning], [category], [notes]';
+        const ROOT_TOKENS = 'Tokens: [root], [alternates], [meaning], [category], [notes]';
         const WORD_TOKENS  = 'Tokens: [word], [meaning], [pos]';
 
         const tokenHint = containerEl.createEl('p', {
@@ -956,27 +980,26 @@ class RootweaveSettingTab extends PluginSettingTab {
                 })
             );
 
+        // Keep element refs so the button reads live values rather than closure snapshots
+        let templateEl: HTMLInputElement;
         new Setting(containerEl)
             .setName('Format template')
             .setDesc('Arrange the tokens to match your data. Each line will be parsed against this pattern.')
-            .addText(text =>
-                text
-                    .setPlaceholder('[root] [meaning]')
-                    .setValue('[root] [meaning]')
-                    .onChange(value => { importTemplate = value; })
-            );
+            .addText(text => {
+                text.setPlaceholder('[root] [meaning]').setValue('[root] [meaning]');
+                templateEl = text.inputEl;
+            });
 
+        let dataEl: HTMLTextAreaElement;
         const dataSetting = new Setting(containerEl)
             .setName('Data')
             .setDesc('One entry per line. Lines starting with # are skipped.');
         dataSetting.addTextArea(ta => {
-            ta.setPlaceholder('vel light, clarity\nkar fire')
-                .onChange(value => { importData = value; });
+            ta.setPlaceholder('vel light, clarity\nkar fire');
             ta.inputEl.rows = 10;
             ta.inputEl.addClass('rw-import-textarea');
+            dataEl = ta.inputEl;
         });
-
-        const resultEl = containerEl.createEl('p', { cls: 'setting-item-description' });
 
         new Setting(containerEl)
             .addButton(btn =>
@@ -984,20 +1007,16 @@ class RootweaveSettingTab extends PluginSettingTab {
                     .setButtonText('Import')
                     .setCta()
                     .onClick(() => {
-                        resultEl.setText('');
-                        if (!importTemplate.trim()) {
-                            resultEl.setText('Enter a format template first.');
-                            return;
-                        }
-                        if (!importData.trim()) {
-                            resultEl.setText('No data to import.');
-                            return;
-                        }
+                        const importTemplate = templateEl?.value.trim() ?? '';
+                        const importData     = dataEl?.value.trim()     ?? '';
+
+                        if (!importTemplate) { new Notice('Enter a format template first.'); return; }
+                        if (!importData)     { new Notice('Paste some data to import first.'); return; }
 
                         if (importType === 'roots') {
                             const parsed = parseImportRoots(importTemplate, importData);
                             if (parsed.length === 0) {
-                                resultEl.setText('No lines matched the template. Check your format.');
+                                new Notice('No lines matched the template — check your format.');
                                 return;
                             }
                             void this.plugin.loadRoots().then(existing => {
@@ -1009,13 +1028,13 @@ class RootweaveSettingTab extends PluginSettingTab {
                                     added++;
                                 }
                                 void this.plugin.saveRoots(merged).then(() => {
-                                    resultEl.setText(`✓ Imported ${added} root${added !== 1 ? 's' : ''}${skipped ? `, skipped ${skipped} duplicate${skipped !== 1 ? 's' : ''}` : ''}.`);
-                                });
-                            });
+                                    new Notice(`Imported ${added} root${added !== 1 ? 's' : ''}${skipped ? `, skipped ${skipped} duplicate${skipped !== 1 ? 's' : ''}` : ''}.`);
+                                }).catch(err => new Notice(`Save failed: ${err}`));
+                            }).catch(err => new Notice(`Load failed: ${err}`));
                         } else {
                             const parsed = parseImportWords(importTemplate, importData);
                             if (parsed.length === 0) {
-                                resultEl.setText('No lines matched the template. Check your format.');
+                                new Notice('No lines matched the template — check your format.');
                                 return;
                             }
                             void this.plugin.loadDictionary().then(existing => {
@@ -1027,9 +1046,9 @@ class RootweaveSettingTab extends PluginSettingTab {
                                     added++;
                                 }
                                 void this.plugin.saveDictionary(merged).then(() => {
-                                    resultEl.setText(`✓ Imported ${added} word${added !== 1 ? 's' : ''}${skipped ? `, skipped ${skipped} duplicate${skipped !== 1 ? 's' : ''}` : ''}.`);
-                                });
-                            });
+                                    new Notice(`Imported ${added} word${added !== 1 ? 's' : ''}${skipped ? `, skipped ${skipped} duplicate${skipped !== 1 ? 's' : ''}` : ''}.`);
+                                }).catch(err => new Notice(`Save failed: ${err}`));
+                            }).catch(err => new Notice(`Load failed: ${err}`));
                         }
                     })
             );
