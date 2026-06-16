@@ -586,3 +586,104 @@
     width: 100%;
     font-family: var(--font-monospace);
 }
+
+/* ── Graph View ─────────────────────────────────────────────────────────────── */
+
+.rw-graph-view {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    padding: 8px 10px;
+    box-sizing: border-box;
+    font-family: var(--font-interface);
+}
+
+.rw-graph-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+}
+
+.rw-graph-legend {
+    font-size: 0.8em;
+    color: var(--text-muted);
+}
+
+.rw-legend-root {
+    color: var(--interactive-accent);
+    font-size: 1.1em;
+}
+
+.rw-legend-word {
+    color: var(--text-muted);
+    font-size: 1.1em;
+}
+
+.rw-graph-canvas {
+    flex: 1;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    overflow: hidden;
+    position: relative;
+    background: var(--background-secondary);
+    cursor: grab;
+}
+
+.rw-graph-canvas:active {
+    cursor: grabbing;
+}
+
+/* SVG elements */
+.rw-graph-edge {
+    stroke: var(--background-modifier-border);
+    stroke-width: 1.5;
+}
+
+.rw-node-root {
+    fill: var(--interactive-accent);
+}
+
+.rw-node-word {
+    fill: var(--text-muted);
+    opacity: 0.65;
+}
+
+.rw-graph-label {
+    font-size: 10px;
+    fill: var(--text-normal);
+    font-family: var(--font-interface);
+    pointer-events: none;
+    user-select: none;
+}
+
+.rw-graph-node {
+    cursor: grab;
+}
+
+.rw-graph-node:active {
+    cursor: grabbing;
+}
+
+/* Tooltip bar at the bottom of the canvas */
+.rw-graph-tip {
+    display: none;
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--background-primary);
+    border-top: 1px solid var(--background-modifier-border);
+    padding: 4px 10px;
+    font-size: 0.8em;
+    color: var(--text-normal);
+    pointer-events: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.rw-graph-tip.is-visible {
+    display: block;
+}

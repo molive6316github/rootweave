@@ -25,7 +25,8 @@ import {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const VIEW_TYPE = 'rootweave-view';
+const VIEW_TYPE       = 'rootweave-view';
+const VIEW_TYPE_GRAPH = 'rootweave-graph';
 
 const FILES = {
     roots:   '.rootweave/Roots.md',
@@ -264,6 +265,75 @@ function matchCase(source: string, target: string): string {
     return target;
 }
 
+// ─── Graph types and layout ───────────────────────────────────────────────────
+
+interface GNode {
+    id: string;
+    kind: 'root' | 'word';
+    label: string;
+    sub: string;   // meaning
+    tag: string;   // category or pos
+    x: number; y: number;
+    vx: number; vy: number;
+}
+
+interface GEdge { src: string; tgt: string; }
+
+// Basic force-directed layout — runs a fixed number of iterations then stops.
+// Good enough for conlang-sized graphs (tens to low hundreds of nodes).
+function forceLayout(nodes: GNode[], edges: GEdge[], W: number, H: number) {
+    nodes.forEach((n, i) => {
+        const a = (2 * Math.PI * i) / nodes.length;
+        n.x  = W / 2 + Math.cos(a) * Math.min(W, H) * 0.35;
+        n.y  = H / 2 + Math.sin(a) * Math.min(W, H) * 0.35;
+        n.vx = 0; n.vy = 0;
+    });
+
+    const map = new Map(nodes.map(n => [n.id, n]));
+
+    for (let t = 0; t < 280; t++) {
+        const damp = 0.9 - 0.5 * (t / 280);
+
+        // Node-to-node repulsion
+        for (let i = 0; i < nodes.length; i++) {
+            for (let j = i + 1; j < nodes.length; j++) {
+                const a = nodes[i], b = nodes[j];
+                const dx = (b.x - a.x) || 0.01;
+                const dy = (b.y - a.y) || 0.01;
+                const d2 = Math.max(dx * dx + dy * dy, 1);
+                const f = 4000 / d2;
+                a.vx -= (dx / Math.sqrt(d2)) * f;
+                a.vy -= (dy / Math.sqrt(d2)) * f;
+                b.vx += (dx / Math.sqrt(d2)) * f;
+                b.vy += (dy / Math.sqrt(d2)) * f;
+            }
+        }
+
+        // Edge spring attraction
+        edges.forEach(e => {
+            const a = map.get(e.src), b = map.get(e.tgt);
+            if (!a || !b) return;
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const d  = Math.sqrt(dx * dx + dy * dy) || 1;
+            const f  = (d - 90) * 0.07;
+            a.vx += (dx / d) * f; a.vy += (dy / d) * f;
+            b.vx -= (dx / d) * f; b.vy -= (dy / d) * f;
+        });
+
+        // Soft gravity toward center
+        nodes.forEach(n => {
+            n.vx += (W / 2 - n.x) * 0.006;
+            n.vy += (H / 2 - n.y) * 0.006;
+            n.x   = Math.max(24, Math.min(W - 24, n.x + n.vx * damp));
+            n.y   = Math.max(24, Math.min(H - 24, n.y + n.vy * damp));
+            n.vx *= damp; n.vy *= damp;
+        });
+    }
+}
+
+const SVGNS = 'http://www.w3.org/2000/svg';
+const mksvg  = (tag: string) => document.createElementNS(SVGNS, tag);
+
 // ─── Plugin ───────────────────────────────────────────────────────────────────
 
 export default class RootweavePlugin extends Plugin {
@@ -271,9 +341,11 @@ export default class RootweavePlugin extends Plugin {
 
     async onload() {
         await this.loadSettings();
-        this.registerView(VIEW_TYPE, leaf => new RootweaveView(leaf, this));
+        this.registerView(VIEW_TYPE,       leaf => new RootweaveView(leaf, this));
+        this.registerView(VIEW_TYPE_GRAPH, leaf => new GraphView(leaf, this));
         this.addRibbonIcon('book-open', 'Rootweave', () => { void this.openPanel(); });
-        this.addCommand({ id: 'open', name: 'Open panel', callback: () => { void this.openPanel(); } });
+        this.addCommand({ id: 'open',       name: 'Open panel',      callback: () => { void this.openPanel(); } });
+        this.addCommand({ id: 'open-graph', name: 'Open root graph', callback: () => { void this.openGraph(); } });
         this.addSettingTab(new RootweaveSettingTab(this.app, this));
     }
 
@@ -287,6 +359,17 @@ export default class RootweavePlugin extends Plugin {
             if (right) { await right.setViewState({ type: VIEW_TYPE, active: true }); leaf = right; }
         }
         if (leaf) workspace.setActiveLeaf(leaf, { focus: true });
+    }
+
+    async openGraph() {
+        const { workspace } = this.app;
+        // Re-use an existing graph leaf if one is already open
+        let leaf = workspace.getLeavesOfType(VIEW_TYPE_GRAPH)[0];
+        if (!leaf) {
+            leaf = workspace.getLeaf(false);
+            await leaf.setViewState({ type: VIEW_TYPE_GRAPH, active: true });
+        }
+        workspace.setActiveLeaf(leaf, { focus: true });
     }
 
     // ── Vault I/O ─────────────────────────────────────────────────────────────
@@ -768,6 +851,9 @@ class RootweaveView extends ItemView {
 
         el.createEl('div', { cls: 'rw-divider' });
 
+        el.createEl('button', { cls: 'rw-btn', text: 'Open Root Graph' })
+            .addEventListener('click', () => { void this.plugin.openGraph(); });
+
         el.createEl('button', { cls: 'rw-btn rw-btn-primary', text: 'Export Snapshot' })
             .addEventListener('click', () => {
                 const lang    = this.plugin.settings.language;
@@ -779,6 +865,202 @@ class RootweaveView extends ItemView {
                 void (existing instanceof TFile ? this.app.vault.modify(existing, content) : this.app.vault.create(np, content))
                     .then(() => new Notice(`Exported to ${fname}`));
             });
+    }
+}
+
+// ─── Graph View ───────────────────────────────────────────────────────────────
+
+class GraphView extends ItemView {
+    plugin: RootweavePlugin;
+    private roots: Root[] = [];
+    private words: Word[] = [];
+
+    constructor(leaf: WorkspaceLeaf, plugin: RootweavePlugin) {
+        super(leaf);
+        this.plugin = plugin;
+    }
+
+    getViewType()    { return VIEW_TYPE_GRAPH; }
+    getDisplayText() { return 'Root Graph'; }
+    getIcon()        { return 'git-fork'; }
+
+    async onOpen() {
+        try {
+            [this.roots, this.words] = await Promise.all([
+                this.plugin.loadRoots(),
+                this.plugin.loadWords(),
+            ]);
+        } catch (e) { console.error('Rootweave graph error', e); }
+        this.render();
+    }
+
+    async onClose(): Promise<void> {}
+
+    private render() {
+        const el = this.contentEl;
+        el.empty();
+        el.addClass('rw-graph-view');
+
+        // Toolbar
+        const bar = el.createEl('div', { cls: 'rw-graph-bar' });
+        const legend = bar.createEl('span', { cls: 'rw-graph-legend' });
+        legend.createEl('span', { cls: 'rw-legend-root', text: '●' });
+        legend.appendText(' Root   ');
+        legend.createEl('span', { cls: 'rw-legend-word', text: '●' });
+        legend.appendText(' Word');
+        bar.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Refresh' })
+            .addEventListener('click', () => { void this.onOpen(); });
+
+        if (!this.roots.length && !this.words.length) {
+            el.createEl('p', { cls: 'rw-empty', text: 'No data yet — add some roots and words first.' });
+            return;
+        }
+
+        const canvas = el.createEl('div', { cls: 'rw-graph-canvas' });
+        // Wait one frame so the container has layout dimensions before we measure it
+        requestAnimationFrame(() => { this.buildGraph(canvas); });
+    }
+
+    private buildGraph(container: HTMLElement) {
+        const W = container.clientWidth  || 500;
+        const H = container.clientHeight || 500;
+
+        // Build node and edge lists from plugin data
+        const nodes: GNode[] = [
+            ...this.roots.map(r => ({ id: `r:${r.root}`, kind: 'root' as const, label: r.root, sub: r.meaning, tag: r.category, x: 0, y: 0, vx: 0, vy: 0 })),
+            ...this.words.map(w => ({ id: `w:${w.word}`, kind: 'word' as const, label: w.word, sub: w.meaning, tag: w.pos,      x: 0, y: 0, vx: 0, vy: 0 })),
+        ];
+        const edges: GEdge[] = this.words.flatMap(w =>
+            w.roots
+                .filter(r => nodes.some(n => n.id === `r:${r}`))
+                .map(r => ({ src: `r:${r}`, tgt: `w:${w.word}` }))
+        );
+
+        forceLayout(nodes, edges, W, H);
+
+        const nodeMap = new Map(nodes.map(n => [n.id, n]));
+
+        // SVG root
+        const svg = mksvg('svg') as SVGSVGElement;
+        svg.setAttribute('width',  String(W));
+        svg.setAttribute('height', String(H));
+        container.appendChild(svg);
+
+        // One group we transform for pan/zoom
+        let panX = 0, panY = 0, zoom = 1;
+        const world = mksvg('g') as SVGGElement;
+        svg.appendChild(world);
+
+        const applyTransform = () =>
+            world.setAttribute('transform', `translate(${panX},${panY}) scale(${zoom})`);
+        applyTransform();
+
+        // Convert screen coords to graph coords
+        const toGraph = (ex: number, ey: number) => {
+            const r = svg.getBoundingClientRect();
+            return { x: (ex - r.left - panX) / zoom, y: (ey - r.top - panY) / zoom };
+        };
+
+        // ── Edges ──────────────────────────────────────────────────────────────
+
+        const edgeEls = new Map<string, SVGLineElement>();
+        edges.forEach(e => {
+            const src = nodeMap.get(e.src), tgt = nodeMap.get(e.tgt);
+            if (!src || !tgt) return;
+            const line = mksvg('line') as SVGLineElement;
+            line.setAttribute('class', 'rw-graph-edge');
+            line.setAttribute('x1', String(src.x)); line.setAttribute('y1', String(src.y));
+            line.setAttribute('x2', String(tgt.x)); line.setAttribute('y2', String(tgt.y));
+            world.appendChild(line);
+            edgeEls.set(`${e.src}|${e.tgt}`, line);
+        });
+
+        const refreshEdges = () => edges.forEach(e => {
+            const line = edgeEls.get(`${e.src}|${e.tgt}`);
+            const src  = nodeMap.get(e.src), tgt = nodeMap.get(e.tgt);
+            if (!line || !src || !tgt) return;
+            line.setAttribute('x1', String(src.x)); line.setAttribute('y1', String(src.y));
+            line.setAttribute('x2', String(tgt.x)); line.setAttribute('y2', String(tgt.y));
+        });
+
+        // ── Nodes ──────────────────────────────────────────────────────────────
+
+        const nodeEls = new Map<string, SVGGElement>();
+        const tip = container.createEl('div', { cls: 'rw-graph-tip' });
+
+        nodes.forEach(node => {
+            const g = mksvg('g') as SVGGElement;
+            g.setAttribute('class', `rw-graph-node rw-graph-node-${node.kind}`);
+            g.setAttribute('transform', `translate(${node.x},${node.y})`);
+
+            const radius = node.kind === 'root' ? 13 : 8;
+            const circle = mksvg('circle') as SVGCircleElement;
+            circle.setAttribute('r', String(radius));
+            circle.setAttribute('class', `rw-node-${node.kind}`);
+            g.appendChild(circle);
+
+            const label = mksvg('text') as SVGTextElement;
+            label.setAttribute('y', String(radius + 12));
+            label.setAttribute('text-anchor', 'middle');
+            label.setAttribute('class', 'rw-graph-label');
+            label.textContent = node.label;
+            g.appendChild(label);
+
+            world.appendChild(g);
+            nodeEls.set(node.id, g);
+
+            g.addEventListener('mouseenter', () => {
+                tip.setText(`${node.label}  —  ${node.sub}${node.tag ? `  [${node.tag}]` : ''}`);
+                tip.addClass('is-visible');
+            });
+            g.addEventListener('mouseleave', () => tip.removeClass('is-visible'));
+        });
+
+        // ── Pointer interaction (drag nodes, pan background, zoom) ─────────────
+
+        let dragNode: GNode | null = null;
+        let dragOX = 0, dragOY = 0;
+        let panning = false, panSX = 0, panSY = 0;
+
+        nodes.forEach(node => {
+            nodeEls.get(node.id)?.addEventListener('mousedown', e => {
+                e.stopPropagation();
+                const gp = toGraph(e.clientX, e.clientY);
+                dragOX = gp.x - node.x;
+                dragOY = gp.y - node.y;
+                dragNode = node;
+            });
+        });
+
+        svg.addEventListener('mousedown', e => {
+            panning = true;
+            panSX = e.clientX - panX;
+            panSY = e.clientY - panY;
+        });
+
+        svg.addEventListener('mousemove', e => {
+            if (dragNode) {
+                const gp = toGraph(e.clientX, e.clientY);
+                dragNode.x = gp.x - dragOX;
+                dragNode.y = gp.y - dragOY;
+                nodeEls.get(dragNode.id)?.setAttribute('transform', `translate(${dragNode.x},${dragNode.y})`);
+                refreshEdges();
+            } else if (panning) {
+                panX = e.clientX - panSX;
+                panY = e.clientY - panSY;
+                applyTransform();
+            }
+        });
+
+        const stopAll = () => { dragNode = null; panning = false; };
+        svg.addEventListener('mouseup',    stopAll);
+        svg.addEventListener('mouseleave', stopAll);
+
+        svg.addEventListener('wheel', e => {
+            e.preventDefault();
+            zoom = Math.max(0.15, Math.min(6, zoom * (e.deltaY > 0 ? 0.9 : 1.1)));
+            applyTransform();
+        }, { passive: false });
     }
 }
 
