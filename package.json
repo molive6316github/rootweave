@@ -1,6 +1,6 @@
 {
   "name": "rootweave",
-  "version": "1.0.0",
+  "version": "1.5.0",
   "description": "Obsidian plugin for conlang worldbuilders",
   "main": "main.js",
   "scripts": {
@@ -11,7 +11,12 @@
     "deploy": "node install.js",
     "version": "node version-bump.mjs"
   },
-  "keywords": ["obsidian", "conlang", "worldbuilding", "linguistics"],
+  "keywords": [
+    "obsidian",
+    "conlang",
+    "worldbuilding",
+    "linguistics"
+  ],
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^16.11.6",
