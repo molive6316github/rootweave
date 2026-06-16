@@ -534,8 +534,7 @@ class RootweaveView extends ItemView {
 
             const existing = this.words.find(w => w.word.toLowerCase() === word.toLowerCase());
             if (existing) {
-                const msg = saveArea.createEl('p', { cls: 'rw-ok', text: `✓ "${word}" is in the dictionary — ${existing.meaning}` });
-                msg.style.cursor = 'pointer';
+                const msg = saveArea.createEl('p', { cls: 'rw-ok rw-ok-link', text: `✓ "${word}" is in the dictionary — ${existing.meaning}` });
                 msg.title = 'Click to edit';
                 msg.addEventListener('click', () => {
                     new WordModal(this.app, existing, updated => {

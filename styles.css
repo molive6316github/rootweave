@@ -109,6 +109,10 @@
     margin: 4px 0;
 }
 
+.rw-ok-link {
+    cursor: pointer;
+}
+
 /* ── Form controls ─────────────────────────────────────────────────────────── */
 
 .rw-controls {
