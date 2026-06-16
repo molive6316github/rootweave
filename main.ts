@@ -820,9 +820,6 @@ class RootweaveSettingTab extends PluginSettingTab {
         const { containerEl } = this;
         containerEl.empty();
 
-        // Use setHeading() instead of createEl('h2') for consistent settings UI
-        new Setting(containerEl).setName('Rootweave').setHeading();
-
         new Setting(containerEl)
             .setName('Language name')
             .setDesc('Used in export file names and headings.')
