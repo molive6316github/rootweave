@@ -286,6 +286,24 @@
     padding: 0 5px;
 }
 
+/* Grammar rule type badges */
+.rw-badge-required {
+    background: rgba(76, 175, 80, 0.15);
+    color: var(--color-green, #4caf50);
+}
+
+.rw-badge-forbidden {
+    background: var(--background-modifier-error, rgba(230, 80, 80, 0.1));
+    color: var(--text-error, #e05252);
+}
+
+/* Alternate form chip (e.g. "via sight") */
+.rw-alt-chip {
+    color: var(--text-muted);
+    font-size: 0.82em;
+    font-style: italic;
+}
+
 /* ── Word Builder ───────────────────────────────────────────────────────────── */
 
 .rw-suggestions {
