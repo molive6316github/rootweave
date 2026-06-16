@@ -320,13 +320,24 @@ class RootweaveView extends ItemView {
     getIcon(): string        { return 'book-open'; }
 
     async onOpen() {
-        [this.roots, this.dictionary, this.grammar] = await Promise.all([
-            this.plugin.loadRoots(),
-            this.plugin.loadDictionary(),
-            this.plugin.loadGrammar(),
-        ]);
-        const grammarFile = this.app.vault.getAbstractFileByPath(normalizePath(GRAMMAR_FILE));
-        if (!grammarFile) await this.plugin.saveGrammar(this.grammar);
+        try {
+            [this.roots, this.dictionary, this.grammar] = await Promise.all([
+                this.plugin.loadRoots(),
+                this.plugin.loadDictionary(),
+                this.plugin.loadGrammar(),
+            ]);
+            // Auto-create any data files that don't exist yet
+            const saves: Promise<void>[] = [];
+            if (!this.app.vault.getAbstractFileByPath(normalizePath(ROOTS_FILE)))
+                saves.push(this.plugin.saveRoots(this.roots));
+            if (!this.app.vault.getAbstractFileByPath(normalizePath(DICT_FILE)))
+                saves.push(this.plugin.saveDictionary(this.dictionary));
+            if (!this.app.vault.getAbstractFileByPath(normalizePath(GRAMMAR_FILE)))
+                saves.push(this.plugin.saveGrammar(this.grammar));
+            await Promise.allSettled(saves);
+        } catch (err) {
+            console.error('Rootweave: error during onOpen', err);
+        }
         this.render();
     }
 

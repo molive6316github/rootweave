@@ -53,7 +53,13 @@ function findVaults() {
     } else if (process.platform === 'darwin') {
         configDir = path.join(os.homedir(), 'Library', 'Application Support', 'obsidian');
     } else {
-        configDir = path.join(os.homedir(), '.config', 'obsidian');
+        // WSL: Obsidian runs on Windows, so check the Windows AppData path first
+        const wslWindowsAppData = '/mnt/c/Users/' + os.userInfo().username + '/AppData/Roaming/obsidian';
+        if (process.env.WSL_DISTRO_NAME && fs.existsSync(wslWindowsAppData)) {
+            configDir = wslWindowsAppData;
+        } else {
+            configDir = path.join(os.homedir(), '.config', 'obsidian');
+        }
     }
 
     const configFile = path.join(configDir, 'obsidian.json');
@@ -61,9 +67,16 @@ function findVaults() {
 
     try {
         const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-        // obsidian.json has a "vaults" object keyed by random IDs
+        // obsidian.json has a "vaults" object keyed by random IDs.
+        // On WSL, Windows paths like "C:\foo" must become "/mnt/c/foo".
         return Object.values(config.vaults || {})
-            .map(v => v.path)
+            .map(v => {
+                let p = v.path;
+                if (p && process.env.WSL_DISTRO_NAME) {
+                    p = p.replace(/\\/g, '/').replace(/^([A-Za-z]):/, (_, d) => '/mnt/' + d.toLowerCase());
+                }
+                return p;
+            })
             .filter(p => p && fs.existsSync(p));
     } catch {
         return [];
@@ -116,9 +129,12 @@ async function main() {
     let vaultPath;
 
     if (argVault) {
-        if (!fs.existsSync(path.join(argVault, '.obsidian'))) {
-            console.error(`❌  "${argVault}" doesn't look like an Obsidian vault (.obsidian folder not found).`);
+        if (!fs.existsSync(argVault)) {
+            console.error(`❌  "${argVault}" does not exist.`);
             process.exit(1);
+        }
+        if (!fs.existsSync(path.join(argVault, '.obsidian'))) {
+            console.log(`⚠️   No .obsidian folder found — creating it. Open the vault in Obsidian after installing to finish initialization.`);
         }
         vaultPath = argVault;
     } else {
