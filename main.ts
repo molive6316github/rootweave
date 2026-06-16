@@ -341,31 +341,21 @@ export default class RootweavePlugin extends Plugin {
     // ── Vault I/O ──────────────────────────────────────────────────────────────
 
     async readMd(path: string): Promise<string | null> {
-        const file = this.app.vault.getAbstractFileByPath(normalizePath(path));
-        if (!(file instanceof TFile)) return null;
-        return this.app.vault.read(file);
+        try {
+            return await this.app.vault.adapter.read(normalizePath(path));
+        } catch {
+            return null;
+        }
     }
 
     async writeMd(path: string, content: string): Promise<void> {
         const normalPath = normalizePath(path);
         const dir = normalPath.split('/').slice(0, -1).join('/');
         if (dir) {
-            // Try to create; swallow "already exists" — getAbstractFileByPath can miss
-            // recently-created folders before the cache refreshes.
             try { await this.app.vault.createFolder(dir); } catch { /* exists */ }
         }
-        const existing = this.app.vault.getAbstractFileByPath(normalPath);
-        if (existing instanceof TFile) {
-            await this.app.vault.modify(existing, content);
-        } else {
-            try {
-                await this.app.vault.create(normalPath, content);
-            } catch {
-                // File exists but not yet in vault cache — re-fetch and modify
-                const fresh = this.app.vault.getAbstractFileByPath(normalPath);
-                if (fresh instanceof TFile) await this.app.vault.modify(fresh, content);
-            }
-        }
+        // adapter.write creates-or-overwrites without relying on the vault file cache
+        await this.app.vault.adapter.write(normalPath, content);
     }
 
     // ── Data accessors ─────────────────────────────────────────────────────────
