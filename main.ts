@@ -349,8 +349,10 @@ export default class RootweavePlugin extends Plugin {
     async writeMd(path: string, content: string): Promise<void> {
         const normalPath = normalizePath(path);
         const dir = normalPath.split('/').slice(0, -1).join('/');
-        if (dir && !this.app.vault.getAbstractFileByPath(dir)) {
-            await this.app.vault.createFolder(dir);
+        if (dir) {
+            // Try to create; swallow "already exists" — getAbstractFileByPath can miss
+            // recently-created folders before the cache refreshes.
+            try { await this.app.vault.createFolder(dir); } catch { /* exists */ }
         }
         const existing = this.app.vault.getAbstractFileByPath(normalPath);
         if (existing instanceof TFile) {
