@@ -687,3 +687,192 @@
 .rw-graph-tip.is-visible {
     display: block;
 }
+
+/* ── Phonology tab ──────────────────────────────────────────────────────────── */
+
+.rw-phon-section {
+    margin-bottom: 4px;
+}
+
+.rw-phon-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 6px 0;
+}
+
+.rw-phon-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.rw-phon-sym {
+    width: 42px;
+    font-family: var(--font-monospace);
+    text-align: center;
+}
+
+.rw-phon-pron {
+    width: 80px;
+}
+
+.rw-phon-long-label {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 0.82em;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+/* Mode toggle */
+.rw-mode-row {
+    display: flex;
+    gap: 6px;
+    margin: 6px 0 10px;
+}
+
+.rw-mode-btn {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    padding: 4px 12px;
+    cursor: pointer;
+    font-size: 0.85em;
+    color: var(--text-muted);
+    transition: all 0.1s;
+}
+
+.rw-mode-btn.is-active {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+    border-color: var(--interactive-accent);
+}
+
+/* Phoneme breakdown in Builder */
+.rw-phon-breakdown {
+    margin: 8px 0 4px;
+}
+
+.rw-phon-break {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1px;
+    margin: 4px 0;
+    font-family: var(--font-monospace);
+    font-size: 1.05em;
+}
+
+.rw-phon-dot {
+    color: var(--text-faint);
+    font-size: 1.1em;
+}
+
+.rw-phon-token {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 3px;
+    padding: 1px 4px;
+    cursor: help;
+}
+
+.rw-phon-unknown {
+    background: color-mix(in srgb, var(--color-red) 15%, transparent);
+    border: 1px solid var(--color-red);
+    border-radius: 3px;
+    padding: 1px 4px;
+    color: var(--color-red);
+}
+
+.rw-phon-pron-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 5px 0;
+}
+
+.rw-phon-pron-text {
+    font-family: var(--font-monospace);
+    font-size: 1.1em;
+    color: var(--text-accent);
+    font-style: italic;
+}
+
+/* Confidence badges */
+.rw-conf {
+    font-size: 0.78em;
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-weight: 600;
+}
+
+.rw-conf-high { background: color-mix(in srgb, var(--color-green) 20%, transparent); color: var(--color-green); }
+.rw-conf-mid  { background: color-mix(in srgb, var(--color-yellow) 20%, transparent); color: var(--color-yellow); }
+.rw-conf-low  { background: color-mix(in srgb, var(--color-red) 15%, transparent); color: var(--color-red); }
+
+/* Stress row */
+.rw-phon-stress-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin: 5px 0;
+}
+
+.rw-phon-syll {
+    font-family: var(--font-monospace);
+    font-size: 0.95em;
+    opacity: 0.65;
+}
+
+.rw-phon-syll.is-stressed {
+    opacity: 1;
+    border-color: var(--interactive-accent);
+    color: var(--text-accent);
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.rw-phon-warn {
+    font-size: 0.82em;
+    color: var(--color-orange);
+    margin: 3px 0;
+}
+
+.rw-phon-hint, .rw-phon-try-result .rw-empty {
+    font-size: 0.82em;
+    color: var(--text-muted);
+    margin: 4px 0;
+}
+
+/* Try a word result area */
+.rw-phon-try-result {
+    margin-top: 8px;
+    padding: 8px;
+    background: var(--background-secondary);
+    border-radius: 6px;
+    min-height: 32px;
+}
+
+/* Phoneme map SVG */
+.rw-phon-map {
+    display: block;
+    margin: 8px 0;
+    background: var(--background-secondary);
+    border-radius: 6px;
+}
+
+/* Observations list */
+.rw-obs-list {
+    margin: 4px 0 0 16px;
+    padding: 0;
+    font-size: 0.88em;
+    color: var(--text-normal);
+}
+
+.rw-obs-list li {
+    margin-bottom: 2px;
+}

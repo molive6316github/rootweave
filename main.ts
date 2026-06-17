@@ -29,9 +29,10 @@ const VIEW_TYPE       = 'rootweave-view';
 const VIEW_TYPE_GRAPH = 'rootweave-graph';
 
 const FILES = {
-    roots:   '.rootweave/Roots.md',
-    words:   '.rootweave/Dictionary.md',
-    grammar: '.rootweave/Grammar.md',
+    roots:     '.rootweave/Roots.md',
+    words:     '.rootweave/Dictionary.md',
+    grammar:   '.rootweave/Grammar.md',
+    phonology: '.rootweave/Phonology.md',
 };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -70,6 +71,64 @@ const DEFAULT_RULES: Rule[] = [
     { name: 'Plural',     type: 'suffix', form: '-iu',  meaning: 'plural marker', example: 'vel → veliu (lights)',    notes: '' },
     { name: 'Past tense', type: 'prefix', form: 'on-',  meaning: 'past tense',    example: 'vel → onvel (was light)', notes: '' },
 ];
+
+// ─── Phonology types ──────────────────────────────────────────────────────────
+
+interface Phoneme { symbol: string; pron: string; long: boolean; }
+
+interface PhonologyData {
+    vowels:     Phoneme[];
+    consonants: Phoneme[];
+    mode:       'strict' | 'permissive';
+    banned:     string[];
+    notes:      string;
+}
+
+interface Syllable { phonemes: string[]; isOpen: boolean; isHeavy: boolean; }
+
+interface PronEx { word: string; sylls: string[][]; stress: number; }
+
+interface PhonModel {
+    E:   Record<string, number[]>;
+    mE:  Record<string, number[]>;
+    vE:  Record<string, number[]>;
+    W1:  number[]; b1: number[];
+    W2:  number[]; b2: number[];
+    W3:  number[]; b3: number[];
+    mW1: number[]; vW1: number[];
+    mb1: number[]; vb1: number[];
+    mW2: number[]; vW2: number[];
+    mb2: number[]; vb2: number[];
+    mW3: number[]; vW3: number[];
+    mb3: number[]; vb3: number[];
+    t:   number;
+}
+
+const E_DIM = 8;
+const H1    = 16;
+const H2    = 8;
+const IN    = E_DIM + 6;
+
+const DEFAULT_PHONOLOGY: PhonologyData = {
+    vowels: [
+        { symbol: 'a', pron: 'ah', long: false },
+        { symbol: 'e', pron: 'eh', long: false },
+        { symbol: 'i', pron: 'ee', long: false },
+        { symbol: 'o', pron: 'oh', long: false },
+        { symbol: 'u', pron: 'oo', long: false },
+    ],
+    consonants: [
+        { symbol: 'b', pron: 'b', long: false }, { symbol: 'd', pron: 'd', long: false },
+        { symbol: 'f', pron: 'f', long: false }, { symbol: 'g', pron: 'g', long: false },
+        { symbol: 'k', pron: 'k', long: false }, { symbol: 'l', pron: 'l', long: false },
+        { symbol: 'm', pron: 'm', long: false }, { symbol: 'n', pron: 'n', long: false },
+        { symbol: 'r', pron: 'r', long: false }, { symbol: 's', pron: 's', long: false },
+        { symbol: 't', pron: 't', long: false }, { symbol: 'v', pron: 'v', long: false },
+    ],
+    mode: 'strict',
+    banned: [],
+    notes: '',
+};
 
 // ─── Markdown table helpers ───────────────────────────────────────────────────
 
@@ -188,6 +247,43 @@ function rulesToMd(rules: Rule[]): string {
     ].join('\n');
 }
 
+function parsePhonSection(content: string, heading: string): Record<string, string>[] {
+    const re = new RegExp(`##\\s+${heading}\\s*\\n([\\s\\S]*?)(?=\\n## |$)`, 'i');
+    const m  = re.exec(content);
+    return m ? parseMdTable(m[1]) : [];
+}
+
+function parsePhonology(content: string): PhonologyData {
+    const vowRows  = parsePhonSection(content, 'Vowels');
+    const conRows  = parsePhonSection(content, 'Consonants');
+    const setRows  = parsePhonSection(content, 'Settings');
+    const settings: Record<string, string> = {};
+    setRows.forEach(r => { if (r['key']) settings[r['key']] = r['value'] ?? ''; });
+    return {
+        vowels:     vowRows.map(r => ({ symbol: r['symbol'] ?? '', pron: r['pron'] ?? '', long: r['long'] === 'yes' })).filter(p => p.symbol),
+        consonants: conRows.map(r => ({ symbol: r['symbol'] ?? '', pron: r['pron'] ?? '', long: false })).filter(p => p.symbol),
+        mode:       settings['mode'] === 'permissive' ? 'permissive' : 'strict',
+        banned:     (settings['banned'] ?? '').split(',').map(s => s.trim()).filter(Boolean),
+        notes:      settings['notes'] ?? '',
+    };
+}
+
+function phonologyToMd(p: PhonologyData): string {
+    return [
+        '# Phonology', '',
+        '## Vowels',
+        buildMdTable(['symbol', 'pron', 'long'], p.vowels.map(v => [v.symbol, v.pron, v.long ? 'yes' : 'no'])),
+        '', '## Consonants',
+        buildMdTable(['symbol', 'pron'], p.consonants.map(c => [c.symbol, c.pron])),
+        '', '## Settings',
+        buildMdTable(['key', 'value'], [
+            ['mode',   p.mode],
+            ['banned', p.banned.join(', ')],
+            ['notes',  p.notes],
+        ]),
+    ].join('\n');
+}
+
 // Apply a prefix/suffix rule to a word and return the resulting form
 function applyRule(rule: Rule, word: string): string | null {
     const affix = rule.form.replace(/^-|-$/g, ''); // strip display dashes
@@ -265,6 +361,299 @@ function matchCase(source: string, target: string): string {
     return target;
 }
 
+// ─── Phonology engine ─────────────────────────────────────────────────────────
+
+// Greedy longest-match tokenizer — handles multi-char phonemes like "th", "ae"
+function phonTokenize(word: string, phonemes: Phoneme[]): string[] {
+    const syms = phonemes.map(p => p.symbol).sort((a, b) => b.length - a.length);
+    const tokens: string[] = [];
+    let i = 0;
+    while (i < word.length) {
+        const match = syms.find(s => word.startsWith(s, i));
+        if (match) { tokens.push(match); i += match.length; }
+        else        { tokens.push(word[i]); i++; }
+    }
+    return tokens;
+}
+
+// Split token list into syllable groups using CV(C) nucleus-rules
+function phonSyllabify(tokens: string[], vowelSet: Set<string>): string[][] {
+    if (!tokens.length) return [];
+    const sylls: string[][] = [];
+    let cur: string[]  = [];
+    let hasVowel = false;
+    for (let i = 0; i < tokens.length; i++) {
+        const isV = vowelSet.has(tokens[i]);
+        if (isV && hasVowel) {
+            sylls.push(cur); cur = [tokens[i]]; hasVowel = true;
+        } else if (!isV && hasVowel) {
+            const nextIsV = i + 1 < tokens.length && vowelSet.has(tokens[i + 1]);
+            if (nextIsV) { sylls.push(cur); cur = [tokens[i]]; hasVowel = false; }
+            else { cur.push(tokens[i]); }
+        } else {
+            cur.push(tokens[i]);
+            if (isV) hasVowel = true;
+        }
+    }
+    if (cur.length) sylls.push(cur);
+    return sylls;
+}
+
+function makeSyllables(syllTokens: string[][], phon: PhonologyData): Syllable[] {
+    const vowelSet = new Set(phon.vowels.map(v => v.symbol));
+    return syllTokens.map(phonemes => {
+        const isOpen  = phonemes.length > 0 && vowelSet.has(phonemes[phonemes.length - 1]);
+        const hasLong = phonemes.some(p => phon.vowels.find(v => v.symbol === p)?.long);
+        return { phonemes, isOpen, isHeavy: hasLong || !isOpen };
+    });
+}
+
+// Build pronunciation string: 'VEH-lee-oo style
+function phonReconstruct(syllTokens: string[][], stressIdx: number, phon: PhonologyData): string {
+    const allPh = [...phon.vowels, ...phon.consonants];
+    return syllTokens.map((syll, si) => {
+        const syllStr = syll.map(p => allPh.find(x => x.symbol === p)?.pron ?? p).join('');
+        return (si === stressIdx ? "'" : '') + syllStr;
+    }).join('-');
+}
+
+// ── Neural network ─────────────────────────────────────────────────────────────
+
+function nnRand(n: number, fi: number, fo: number): number[] {
+    const s = Math.sqrt(2 / (fi + fo));
+    return Array.from({ length: n }, () => (Math.random() * 2 - 1) * s);
+}
+function nnZero(n: number): number[] { return new Array(n).fill(0); }
+
+// Dense layer: output[j] = b[j] + Σ_i W[i*outD+j] * x[i]
+function matVec(W: number[], x: number[], inD: number, outD: number, b: number[]): number[] {
+    const out = b.slice();
+    for (let i = 0; i < inD; i++)
+        for (let j = 0; j < outD; j++)
+            out[j] += W[i * outD + j] * x[i];
+    return out;
+}
+
+function matVecBack(
+    delta: number[], x: number[], W: number[], inD: number, outD: number
+): { gW: number[]; gb: number[]; dx: number[] } {
+    const gW = new Array(inD * outD).fill(0);
+    const dx = new Array(inD).fill(0);
+    for (let i = 0; i < inD; i++)
+        for (let j = 0; j < outD; j++) {
+            gW[i * outD + j] = x[i] * delta[j];
+            dx[i] += W[i * outD + j] * delta[j];
+        }
+    return { gW, gb: delta.slice(), dx };
+}
+
+function nnSoftmax(x: number[]): number[] {
+    const max = Math.max(...x);
+    const e   = x.map(v => Math.exp(v - max));
+    const s   = e.reduce((a, b) => a + b, 0) || 1;
+    return e.map(v => v / s);
+}
+
+function reluBack(delta: number[], preAct: number[]): number[] {
+    return delta.map((d, i) => preAct[i] > 0 ? d : 0);
+}
+
+function adamStep(param: number[], grad: number[], m: number[], v: number[], t: number, lr = 0.01) {
+    const b1 = 0.9, b2 = 0.999, eps = 1e-8;
+    const bc1 = 1 - Math.pow(b1, t), bc2 = 1 - Math.pow(b2, t);
+    for (let i = 0; i < param.length; i++) {
+        m[i] = b1 * m[i] + (1 - b1) * grad[i];
+        v[i] = b2 * v[i] + (1 - b2) * grad[i] * grad[i];
+        param[i] -= lr * (m[i] / bc1) / (Math.sqrt(v[i] / bc2) + eps);
+    }
+}
+
+function newPhonModel(phonemeSymbols: string[]): PhonModel {
+    return {
+        E:   Object.fromEntries(phonemeSymbols.map(p => [p, nnRand(E_DIM, 1, E_DIM)])),
+        mE:  Object.fromEntries(phonemeSymbols.map(p => [p, nnZero(E_DIM)])),
+        vE:  Object.fromEntries(phonemeSymbols.map(p => [p, nnZero(E_DIM)])),
+        W1: nnRand(IN * H1, IN, H1), b1: nnZero(H1),
+        W2: nnRand(H1 * H2, H1, H2), b2: nnZero(H2),
+        W3: nnRand(H2,      H2, 1),   b3: nnZero(1),
+        mW1: nnZero(IN * H1), vW1: nnZero(IN * H1),
+        mb1: nnZero(H1),      vb1: nnZero(H1),
+        mW2: nnZero(H1 * H2), vW2: nnZero(H1 * H2),
+        mb2: nnZero(H2),      vb2: nnZero(H2),
+        mW3: nnZero(H2),      vW3: nnZero(H2),
+        mb3: nnZero(1),       vb3: nnZero(1),
+        t: 0,
+    };
+}
+
+function phonGetEmbed(p: string, m: PhonModel): number[] {
+    if (!m.E[p])  m.E[p]  = nnRand(E_DIM, 1, E_DIM);
+    if (!m.mE[p]) m.mE[p] = nnZero(E_DIM);
+    if (!m.vE[p]) m.vE[p] = nnZero(E_DIM);
+    return m.E[p];
+}
+
+// 14-dim feature vector for one syllable
+function syllFeats(syll: Syllable, idx: number, total: number, m: PhonModel): number[] {
+    const embeds = syll.phonemes.map(p => phonGetEmbed(p, m));
+    const avgEmb = Array.from({ length: E_DIM }, (_, j) =>
+        embeds.reduce((s, e) => s + e[j], 0) / (embeds.length || 1)
+    );
+    let onset = 0;
+    for (const p of syll.phonemes) { if (!syll.isHeavy && onset === 0) break; onset++; }
+    return [
+        ...avgEmb,
+        total > 1 ? idx / (total - 1) : 0,
+        total > 1 ? (total - 1 - idx) / (total - 1) : 0,
+        Math.min(total / 6, 1),
+        syll.isOpen  ? 1 : 0,
+        syll.isHeavy ? 1 : 0,
+        Math.min(onset / 3, 1),
+    ];
+}
+
+function nnForward(feat: number[], m: PhonModel): { z1: number[]; h1: number[]; z2: number[]; h2: number[]; score: number } {
+    const z1 = matVec(m.W1, feat, IN, H1, m.b1);
+    const h1 = z1.map(v => Math.max(0, v));
+    const z2 = matVec(m.W2, h1,  H1, H2, m.b2);
+    const h2 = z2.map(v => Math.max(0, v));
+    const z3 = matVec(m.W3, h2,  H2, 1,  m.b3);
+    return { z1, h1, z2, h2, score: z3[0] };
+}
+
+function predictStress(
+    sylls: Syllable[], m: PhonModel
+): { probs: number[]; stressIdx: number; confidence: number } {
+    if (sylls.length === 1) return { probs: [1], stressIdx: 0, confidence: 1 };
+    const scores = sylls.map((s, i) => nnForward(syllFeats(s, i, sylls.length, m), m).score);
+    const probs  = nnSoftmax(scores);
+    const stressIdx = probs.indexOf(Math.max(...probs));
+    const H    = -probs.reduce((s, p) => s + (p > 1e-9 ? p * Math.log(p) : 0), 0);
+    const maxH = Math.log(sylls.length);
+    return { probs, stressIdx, confidence: maxH > 0 ? 1 - H / maxH : 1 };
+}
+
+function trainOnExample(ex: PronEx, m: PhonModel, phon: PhonologyData, lr = 0.008) {
+    const sylls = makeSyllables(ex.sylls, phon);
+    if (sylls.length <= 1) return;
+    m.t++;
+    const feats = sylls.map((s, i) => syllFeats(s, i, sylls.length, m));
+    const fwds  = feats.map(f => nnForward(f, m));
+    const probs = nnSoftmax(fwds.map(f => f.score));
+    const dScores = probs.map((p, i) => p - (i === ex.stress ? 1 : 0));
+
+    const aW1 = nnZero(m.W1.length), ab1 = nnZero(m.b1.length);
+    const aW2 = nnZero(m.W2.length), ab2 = nnZero(m.b2.length);
+    const aW3 = nnZero(m.W3.length), ab3 = nnZero(m.b3.length);
+    const aE: Record<string, number[]> = {};
+
+    sylls.forEach((syll, si) => {
+        const { z1, h1, z2, h2 } = fwds[si];
+        const feat = feats[si];
+        const d3 = dScores[si];
+        const { gW: gW3, gb: gb3, dx: dh2 } = matVecBack([d3], h2, m.W3, H2, 1);
+        const dz2 = reluBack(dh2, z2);
+        const { gW: gW2, gb: gb2, dx: dh1 } = matVecBack(dz2, h1, m.W2, H1, H2);
+        const dz1 = reluBack(dh1, z1);
+        const { gW: gW1, gb: gb1, dx: dFeat } = matVecBack(dz1, feat, m.W1, IN, H1);
+        for (let i = 0; i < aW1.length; i++) aW1[i] += gW1[i];
+        for (let i = 0; i < ab1.length; i++) ab1[i] += gb1[i];
+        for (let i = 0; i < aW2.length; i++) aW2[i] += gW2[i];
+        for (let i = 0; i < ab2.length; i++) ab2[i] += gb2[i];
+        for (let i = 0; i < aW3.length; i++) aW3[i] += gW3[i];
+        for (let i = 0; i < ab3.length; i++) ab3[i] += gb3[i];
+        void gb3; // suppress unused-var warning
+        const dEmb = dFeat.slice(0, E_DIM);
+        const nP   = syll.phonemes.length || 1;
+        syll.phonemes.forEach(p => {
+            if (!aE[p]) aE[p] = nnZero(E_DIM);
+            dEmb.forEach((d, j) => { aE[p][j] += d / nP; });
+        });
+    });
+
+    const L2 = 0.0003;
+    for (let i = 0; i < aW1.length; i++) aW1[i] += L2 * m.W1[i];
+    for (let i = 0; i < aW2.length; i++) aW2[i] += L2 * m.W2[i];
+    for (let i = 0; i < aW3.length; i++) aW3[i] += L2 * m.W3[i];
+
+    adamStep(m.W1, aW1, m.mW1, m.vW1, m.t, lr);
+    adamStep(m.b1, ab1, m.mb1, m.vb1, m.t, lr);
+    adamStep(m.W2, aW2, m.mW2, m.vW2, m.t, lr);
+    adamStep(m.b2, ab2, m.mb2, m.vb2, m.t, lr);
+    adamStep(m.W3, aW3, m.mW3, m.vW3, m.t, lr);
+    adamStep(m.b3, ab3, m.mb3, m.vb3, m.t, lr);
+    Object.entries(aE).forEach(([p, grad]) => {
+        phonGetEmbed(p, m);
+        adamStep(m.E[p], grad, m.mE[p], m.vE[p], m.t, lr * 0.5);
+    });
+}
+
+function batchTrain(examples: PronEx[], m: PhonModel, phon: PhonologyData, epochs = 40) {
+    for (let ep = 0; ep < epochs; ep++)
+        for (const ex of examples)
+            trainOnExample(ex, m, phon, 0.008 * (1 - ep / epochs * 0.4));
+}
+
+// ── PCA for phoneme map ────────────────────────────────────────────────────────
+
+function pca2d(vecs: number[][]): [number, number][] {
+    if (vecs.length < 2) return vecs.map(() => [0, 0] as [number, number]);
+    const n = vecs.length, d = vecs[0].length;
+    const mean = Array.from({ length: d }, (_, j) => vecs.reduce((s, v) => s + v[j], 0) / n);
+    const X    = vecs.map(v => v.map((x, j) => x - mean[j]));
+    const norm = (u: number[]) => Math.sqrt(u.reduce((s, x) => s + x * x, 0)) || 1;
+
+    function powerIter(data: number[][]): number[] {
+        let v = Array.from({ length: d }, () => Math.random() - 0.5);
+        v = v.map(x => x / norm(v));
+        for (let it = 0; it < 60; it++) {
+            const w = data.map(row => row.reduce((s, x, i) => s + x * v[i], 0));
+            const r = Array.from({ length: d }, (_, j) => data.reduce((s, row, i) => s + row[j] * w[i], 0));
+            v = r.map(x => x / norm(r));
+        }
+        return v;
+    }
+
+    const v1 = powerIter(X);
+    const s1  = X.map(row => row.reduce((s, x, i) => s + x * v1[i], 0));
+    const X2  = X.map((row, i) => row.map((x, j) => x - s1[i] * v1[j]));
+    const v2  = powerIter(X2);
+    const s2  = X.map(row => row.reduce((s, x, i) => s + x * v2[i], 0));
+    return s1.map((x, i) => [x, s2[i]] as [number, number]);
+}
+
+// ── Phonotactics inference ─────────────────────────────────────────────────────
+
+function inferPhono(words: Word[], phon: PhonologyData): string[] {
+    if (words.length < 3) return [];
+    const allPh    = [...phon.vowels, ...phon.consonants];
+    const vowelSet = new Set(phon.vowels.map(v => v.symbol));
+    const conSet   = new Set(phon.consonants.map(c => c.symbol));
+    const results: string[] = [];
+    const tokenized = words
+        .map(w => phonTokenize(w.word.toLowerCase(), allPh))
+        .filter(t => t.length > 0 && t.every(p => vowelSet.has(p) || conSet.has(p)));
+    if (tokenized.length < 3) return [];
+    const n     = tokenized.length;
+    const endV  = tokenized.filter(t => vowelSet.has(t[t.length - 1])).length;
+    const startC = tokenized.filter(t => t.length > 0 && !vowelSet.has(t[0])).length;
+    if (endV === n)    results.push(`All ${n} words end in a vowel`);
+    else if (endV === 0) results.push('No words end in a vowel');
+    if (startC === n)  results.push(`All ${n} words start with a consonant`);
+    let maxCluster = 0;
+    for (const t of tokenized) {
+        let run = 0;
+        for (const p of t) { run = vowelSet.has(p) ? 0 : run + 1; maxCluster = Math.max(maxCluster, run); }
+    }
+    if (maxCluster <= 1) results.push('No consonant clusters observed');
+    else results.push(`Largest consonant cluster: ${maxCluster}`);
+    const sylls = tokenized.map(t => phonSyllabify(t, vowelSet).length);
+    const maxS  = Math.max(...sylls);
+    const avgS  = (sylls.reduce((a, b) => a + b, 0) / n).toFixed(1);
+    results.push(`Syllables per word: max ${maxS}, avg ${avgS}`);
+    return results;
+}
+
 // ─── Graph types and layout ───────────────────────────────────────────────────
 
 interface GNode {
@@ -338,6 +727,8 @@ const mksvg  = (tag: string) => document.createElementNS(SVGNS, tag);
 
 export default class RootweavePlugin extends Plugin {
     settings: Settings;
+    phonModel:    PhonModel | null = null;
+    phonExamples: PronEx[]        = [];
 
     async onload() {
         await this.loadSettings();
@@ -399,22 +790,38 @@ export default class RootweavePlugin extends Plugin {
     async loadRules(): Promise<Rule[]>  { const c = await this.readFile(FILES.grammar); return c ? parseRules(c) : DEFAULT_RULES; }
     async saveRules(r: Rule[]):  Promise<void> { await this.writeFile(FILES.grammar, rulesToMd(r)); }
 
+    async loadPhonology(): Promise<PhonologyData> {
+        const c = await this.readFile(FILES.phonology);
+        return c ? parsePhonology(c) : { ...DEFAULT_PHONOLOGY };
+    }
+    async savePhonology(p: PhonologyData): Promise<void> { await this.writeFile(FILES.phonology, phonologyToMd(p)); }
+
     async reloadView() {
         for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE))
             if (leaf.view instanceof RootweaveView) await leaf.view.reload();
     }
 
-    // ── Settings ──────────────────────────────────────────────────────────────
+    // ── Settings (includes phonModel / phonExamples in pluginData) ────────────
 
     async loadSettings() {
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<Settings>);
+        const data = (await this.loadData() as Record<string, unknown>) ?? {};
+        this.settings    = { language: (data['language'] as string) ?? DEFAULT_SETTINGS.language };
+        this.phonModel   = (data['phonModel'] as PhonModel | null | undefined) ?? null;
+        this.phonExamples = (data['phonExamples'] as PronEx[] | undefined) ?? [];
     }
-    async saveSettings() { await this.saveData(this.settings); }
+
+    async saveSettings() {
+        await this.saveData({
+            language:     this.settings.language,
+            phonModel:    this.phonModel,
+            phonExamples: this.phonExamples,
+        });
+    }
 }
 
 // ─── Panel View ───────────────────────────────────────────────────────────────
 
-type Tab = 'roots' | 'builder' | 'words' | 'grammar' | 'translator' | 'export';
+type Tab = 'roots' | 'builder' | 'words' | 'grammar' | 'translator' | 'export' | 'phonology';
 
 class RootweaveView extends ItemView {
     plugin: RootweavePlugin;
@@ -422,6 +829,7 @@ class RootweaveView extends ItemView {
     private roots: Root[] = [];
     private words: Word[] = [];
     private rules: Rule[] = [];
+    private phon:  PhonologyData = { ...DEFAULT_PHONOLOGY };
 
     constructor(leaf: WorkspaceLeaf, plugin: RootweavePlugin) {
         super(leaf);
@@ -434,10 +842,11 @@ class RootweaveView extends ItemView {
 
     async reload() {
         try {
-            [this.roots, this.words, this.rules] = await Promise.all([
+            [this.roots, this.words, this.rules, this.phon] = await Promise.all([
                 this.plugin.loadRoots(),
                 this.plugin.loadWords(),
                 this.plugin.loadRules(),
+                this.plugin.loadPhonology(),
             ]);
         } catch (e) { console.error('Rootweave reload error', e); }
         this.render();
@@ -445,16 +854,17 @@ class RootweaveView extends ItemView {
 
     async onOpen() {
         try {
-            [this.roots, this.words, this.rules] = await Promise.all([
+            [this.roots, this.words, this.rules, this.phon] = await Promise.all([
                 this.plugin.loadRoots(),
                 this.plugin.loadWords(),
                 this.plugin.loadRules(),
+                this.plugin.loadPhonology(),
             ]);
-            // Auto-create the data files on first open
             const saves: Promise<void>[] = [];
-            if (!(await this.plugin.readFile(FILES.roots)))   saves.push(this.plugin.saveRoots(this.roots));
-            if (!(await this.plugin.readFile(FILES.words)))   saves.push(this.plugin.saveWords(this.words));
-            if (!(await this.plugin.readFile(FILES.grammar))) saves.push(this.plugin.saveRules(this.rules));
+            if (!(await this.plugin.readFile(FILES.roots)))     saves.push(this.plugin.saveRoots(this.roots));
+            if (!(await this.plugin.readFile(FILES.words)))     saves.push(this.plugin.saveWords(this.words));
+            if (!(await this.plugin.readFile(FILES.grammar)))   saves.push(this.plugin.saveRules(this.rules));
+            if (!(await this.plugin.readFile(FILES.phonology))) saves.push(this.plugin.savePhonology(this.phon));
             await Promise.allSettled(saves);
         } catch (e) { console.error('Rootweave open error', e); }
         this.render();
@@ -478,6 +888,7 @@ class RootweaveView extends ItemView {
             { id: 'words',      label: `Words (${this.words.length})`   },
             { id: 'grammar',    label: `Grammar (${this.rules.length})` },
             { id: 'translator', label: 'Translate'                      },
+            { id: 'phonology',  label: 'Phonology'                      },
             { id: 'export',     label: 'Export'                         },
         ];
 
@@ -495,6 +906,7 @@ class RootweaveView extends ItemView {
             case 'words':      this.renderWords(body);      break;
             case 'grammar':    this.renderGrammar(body);    break;
             case 'translator': this.renderTranslator(body); break;
+            case 'phonology':  this.renderPhonology(body);  break;
             case 'export':     this.renderExport(body);     break;
         }
     }
@@ -571,12 +983,13 @@ class RootweaveView extends ItemView {
         el.createEl('p', { cls: 'rw-subtitle', text: 'Type a word to see its root components and check grammar.' });
         const wordInput = el.createEl('input', { cls: 'rw-input rw-input-lg', attr: { type: 'text', placeholder: 'Type a word…' } });
         const suggestEl = el.createEl('div', { cls: 'rw-suggestions' });
+        const phonEl    = el.createEl('div', { cls: 'rw-phon-breakdown' });
         const formsEl   = el.createEl('div', { cls: 'rw-grammar-forms' });
         const saveArea  = el.createEl('div', { cls: 'rw-add-word-area' });
 
         const analyze = () => {
             const word = wordInput.value.trim();
-            suggestEl.empty(); formsEl.empty(); saveArea.empty();
+            suggestEl.empty(); phonEl.empty(); formsEl.empty(); saveArea.empty();
             if (!word) return;
 
             const matched = this.roots.filter(r =>
@@ -596,6 +1009,72 @@ class RootweaveView extends ItemView {
                 suggestEl.createEl('p', { cls: 'rw-meaning-hint', text: `Composed meaning: ${matched.map(r => r.meaning).join(' + ')}` });
             } else {
                 suggestEl.createEl('p', { cls: 'rw-empty', text: 'No matching roots found.' });
+            }
+
+            // Phoneme breakdown (only when phonology inventory is set up)
+            const allPhonemes = [...this.phon.vowels, ...this.phon.consonants];
+            if (allPhonemes.length > 0) {
+                const vowelSet = new Set(this.phon.vowels.map(v => v.symbol));
+                const tokens   = phonTokenize(word.toLowerCase(), allPhonemes);
+                const knownSet = new Set(allPhonemes.map(p => p.symbol));
+                const unknown  = tokens.filter(p => !knownSet.has(p));
+                const syllTokens = phonSyllabify(tokens, vowelSet);
+                const sylls      = makeSyllables(syllTokens, this.phon);
+
+                if (tokens.length > 0) {
+                    phonEl.createEl('p', { cls: 'rw-label', text: 'Phoneme breakdown:' });
+                    const breakRow = phonEl.createEl('div', { cls: 'rw-phon-break' });
+                    syllTokens.forEach((syll, si) => {
+                        if (si > 0) breakRow.createEl('span', { cls: 'rw-phon-dot', text: ' · ' });
+                        syll.forEach(p => {
+                            const ph = allPhonemes.find(x => x.symbol === p);
+                            const sp = breakRow.createEl('span', { cls: ph ? 'rw-phon-token' : 'rw-phon-unknown', text: p });
+                            if (ph) sp.title = ph.pron;
+                        });
+                    });
+
+                    const model = this.plugin.phonModel;
+                    if (model && sylls.length > 0 && this.plugin.phonExamples.length >= 2) {
+                        const { stressIdx, confidence } = predictStress(sylls, model);
+                        const pron = phonReconstruct(syllTokens, stressIdx, this.phon);
+                        const confPct = Math.round(confidence * 100);
+                        const confCls = confidence > 0.75 ? 'rw-conf-high' : confidence > 0.45 ? 'rw-conf-mid' : 'rw-conf-low';
+                        const pronRow = phonEl.createEl('div', { cls: 'rw-phon-pron-row' });
+                        pronRow.createEl('span', { cls: 'rw-phon-pron-text', text: `/${pron}/` });
+                        pronRow.createEl('span', { cls: `rw-conf ${confCls}`, text: `${confPct}%` });
+
+                        if (sylls.length > 1) {
+                            const stressRow = phonEl.createEl('div', { cls: 'rw-phon-stress-row' });
+                            stressRow.createEl('span', { cls: 'rw-label', text: 'Stress: ' });
+                            syllTokens.forEach((syll, si) => {
+                                const btn = stressRow.createEl('button', {
+                                    cls: 'rw-btn rw-btn-sm rw-phon-syll' + (si === stressIdx ? ' is-stressed' : ''),
+                                    text: syll.join(''),
+                                });
+                                btn.title = 'Click to correct stress';
+                                btn.addEventListener('click', () => {
+                                    const ex: PronEx = { word: word.toLowerCase(), sylls: syllTokens, stress: si };
+                                    this.plugin.phonExamples.push(ex);
+                                    if (!this.plugin.phonModel) {
+                                        this.plugin.phonModel = newPhonModel(allPhonemes.map(p => p.symbol));
+                                    }
+                                    for (let ep = 0; ep < 8; ep++) trainOnExample(ex, this.plugin.phonModel!, this.phon);
+                                    void this.plugin.saveSettings();
+                                    analyze();
+                                });
+                            });
+                        }
+                    } else if (sylls.length > 1) {
+                        const needed = Math.max(0, 2 - this.plugin.phonExamples.length);
+                        phonEl.createEl('p', { cls: 'rw-empty rw-phon-hint', text: needed > 0
+                            ? `Mark stress on ${needed} more word${needed !== 1 ? 's' : ''} in the Phonology tab to enable predictions.`
+                            : 'Go to Phonology → Try a word to train stress prediction.' });
+                    }
+
+                    if (this.phon.mode === 'strict' && unknown.length > 0) {
+                        phonEl.createEl('p', { cls: 'rw-phon-warn', text: `Unknown sounds: ${[...new Set(unknown)].join(', ')} — add them in the Phonology tab` });
+                    }
+                }
             }
 
             // Show each grammar rule applied to this word
@@ -865,6 +1344,327 @@ class RootweaveView extends ItemView {
                 void (existing instanceof TFile ? this.app.vault.modify(existing, content) : this.app.vault.create(np, content))
                     .then(() => new Notice(`Exported to ${fname}`));
             });
+    }
+
+    // ── Phonology tab ─────────────────────────────────────────────────────────
+
+    private renderPhonology(el: HTMLElement) {
+        const savePhon = () => { void this.plugin.savePhonology(this.phon); };
+
+        const renderPhonRow = (
+            parent: HTMLElement,
+            ph: Phoneme,
+            isVowel: boolean,
+            onChange: () => void,
+            onDelete: () => void
+        ) => {
+            const row    = parent.createEl('div', { cls: 'rw-phon-row' });
+            const symIn  = row.createEl('input', { cls: 'rw-input rw-phon-sym',  attr: { type: 'text', value: ph.symbol, placeholder: 'ph' } });
+            const pronIn = row.createEl('input', { cls: 'rw-input rw-phon-pron', attr: { type: 'text', value: ph.pron,   placeholder: 'sound' } });
+            symIn.addEventListener('change',  () => { ph.symbol = symIn.value.trim(); onChange(); });
+            pronIn.addEventListener('change', () => { ph.pron   = pronIn.value.trim(); onChange(); });
+            if (isVowel) {
+                const lbl = row.createEl('label', { cls: 'rw-phon-long-label' });
+                const chk = lbl.createEl('input');
+                chk.type = 'checkbox'; chk.checked = ph.long;
+                lbl.appendText(' long');
+                chk.addEventListener('change', () => { ph.long = chk.checked; onChange(); });
+            }
+            row.createEl('button', { cls: 'rw-btn rw-btn-sm rw-btn-danger', text: '×' }).addEventListener('click', onDelete);
+        };
+
+        // ── Vowels ────────────────────────────────────────────────────────────
+        const vowSection = el.createEl('div', { cls: 'rw-phon-section' });
+        vowSection.createEl('p', { cls: 'rw-label', text: 'Vowels' });
+        vowSection.createEl('p', { cls: 'rw-subtitle', text: 'Symbol = how you type it, Sound = how to say it (e.g. "ah", "/a/").' });
+        const vowList = vowSection.createEl('div', { cls: 'rw-phon-list' });
+
+        const redrawVowels = () => {
+            vowList.empty();
+            this.phon.vowels.forEach((ph, i) =>
+                renderPhonRow(vowList, ph, true,
+                    savePhon,
+                    () => { this.phon.vowels.splice(i, 1); savePhon(); redrawVowels(); }
+                )
+            );
+        };
+        redrawVowels();
+        vowSection.createEl('button', { cls: 'rw-btn rw-btn-sm', text: '+ Vowel' })
+            .addEventListener('click', () => {
+                this.phon.vowels.push({ symbol: '', pron: '', long: false });
+                savePhon(); redrawVowels();
+            });
+
+        el.createEl('div', { cls: 'rw-divider' });
+
+        // ── Consonants ────────────────────────────────────────────────────────
+        const conSection = el.createEl('div', { cls: 'rw-phon-section' });
+        conSection.createEl('p', { cls: 'rw-label', text: 'Consonants' });
+        const conList = conSection.createEl('div', { cls: 'rw-phon-list' });
+
+        const redrawConsonants = () => {
+            conList.empty();
+            this.phon.consonants.forEach((ph, i) =>
+                renderPhonRow(conList, ph, false,
+                    savePhon,
+                    () => { this.phon.consonants.splice(i, 1); savePhon(); redrawConsonants(); }
+                )
+            );
+        };
+        redrawConsonants();
+        conSection.createEl('button', { cls: 'rw-btn rw-btn-sm', text: '+ Consonant' })
+            .addEventListener('click', () => {
+                this.phon.consonants.push({ symbol: '', pron: '', long: false });
+                savePhon(); redrawConsonants();
+            });
+
+        el.createEl('div', { cls: 'rw-divider' });
+
+        // ── Validation mode ───────────────────────────────────────────────────
+        const modeSection = el.createEl('div', { cls: 'rw-phon-section' });
+        modeSection.createEl('p', { cls: 'rw-label', text: 'Validation mode' });
+        const modeRow = modeSection.createEl('div', { cls: 'rw-mode-row' });
+        const makeMode = (id: 'strict' | 'permissive', label: string, desc: string) => {
+            const btn = modeRow.createEl('button', {
+                cls: 'rw-mode-btn' + (this.phon.mode === id ? ' is-active' : ''),
+                text: label,
+            });
+            btn.title = desc;
+            btn.addEventListener('click', () => {
+                this.phon.mode = id;
+                savePhon();
+                modeRow.querySelectorAll('.rw-mode-btn').forEach(b => b.removeClass('is-active'));
+                btn.addClass('is-active');
+            });
+        };
+        makeMode('strict',     'Strict',     'Warn if a word uses sounds not in your inventory.');
+        makeMode('permissive', 'Permissive', 'Allow any characters; inventory is for reference only.');
+
+        const bannedWrap = modeSection.createEl('div', { cls: 'rw-modal-field' });
+        bannedWrap.createEl('label', { text: 'Banned clusters (comma-separated):' });
+        const bannedIn = bannedWrap.createEl('input', { cls: 'rw-input', attr: { type: 'text', value: this.phon.banned.join(', '), placeholder: 'e.g. kk, str' } });
+        bannedIn.addEventListener('change', () => {
+            this.phon.banned = bannedIn.value.split(',').map(s => s.trim()).filter(Boolean);
+            savePhon();
+        });
+
+        el.createEl('div', { cls: 'rw-divider' });
+
+        // ── Try a word ────────────────────────────────────────────────────────
+        const trySection = el.createEl('div', { cls: 'rw-phon-section' });
+        trySection.createEl('p', { cls: 'rw-label', text: 'Try a word' });
+        trySection.createEl('p', { cls: 'rw-subtitle', text: 'See how a word breaks into phonemes and syllables. Click a syllable to correct the stress — the network learns each time.' });
+
+        const tryInput  = trySection.createEl('input', { cls: 'rw-input rw-input-lg', attr: { type: 'text', placeholder: 'Type a word…' } });
+        const tryResult = trySection.createEl('div',   { cls: 'rw-phon-try-result' });
+
+        const tryWord = () => {
+            tryResult.empty();
+            const w = tryInput.value.trim().toLowerCase();
+            if (!w) return;
+
+            const allPh    = [...this.phon.vowels, ...this.phon.consonants];
+            const vowelSet = new Set(this.phon.vowels.map(v => v.symbol));
+            const tokens   = phonTokenize(w, allPh);
+            const syllTokens = phonSyllabify(tokens, vowelSet);
+            const sylls      = makeSyllables(syllTokens, this.phon);
+            const knownSet   = new Set(allPh.map(p => p.symbol));
+            const unknown    = tokens.filter(p => !knownSet.has(p));
+
+            if (!tokens.length) return;
+
+            // Syllable breakdown display
+            const breakRow = tryResult.createEl('div', { cls: 'rw-phon-break' });
+            syllTokens.forEach((syll, si) => {
+                if (si > 0) breakRow.createEl('span', { cls: 'rw-phon-dot', text: ' · ' });
+                syll.forEach(p => {
+                    const ph = allPh.find(x => x.symbol === p);
+                    const sp = breakRow.createEl('span', { cls: ph ? 'rw-phon-token' : 'rw-phon-unknown', text: p });
+                    if (ph) sp.title = ph.pron;
+                });
+            });
+
+            if (sylls.length === 0) return;
+
+            // Get or create model
+            if (!this.plugin.phonModel && allPh.length > 0) {
+                this.plugin.phonModel = newPhonModel(allPh.map(p => p.symbol));
+            }
+            const model = this.plugin.phonModel;
+
+            if (model && this.plugin.phonExamples.length >= 2) {
+                const { stressIdx, confidence } = predictStress(sylls, model);
+                const pron     = phonReconstruct(syllTokens, stressIdx, this.phon);
+                const confPct  = Math.round(confidence * 100);
+                const confCls  = confidence > 0.75 ? 'rw-conf-high' : confidence > 0.45 ? 'rw-conf-mid' : 'rw-conf-low';
+
+                const pronRow = tryResult.createEl('div', { cls: 'rw-phon-pron-row' });
+                pronRow.createEl('span', { cls: 'rw-phon-pron-text', text: `/${pron}/` });
+                pronRow.createEl('span', { cls: `rw-conf ${confCls}`, text: `${confPct}% confident` });
+
+                if (sylls.length > 1) {
+                    const stressRow = tryResult.createEl('div', { cls: 'rw-phon-stress-row' });
+                    stressRow.createEl('span', { cls: 'rw-label', text: 'Stress (click to correct): ' });
+                    syllTokens.forEach((syll, si) => {
+                        const btn = stressRow.createEl('button', {
+                            cls: 'rw-btn rw-btn-sm rw-phon-syll' + (si === stressIdx ? ' is-stressed' : ''),
+                            text: syll.join(''),
+                        });
+                        btn.addEventListener('click', () => {
+                            const ex: PronEx = { word: w, sylls: syllTokens, stress: si };
+                            this.plugin.phonExamples.push(ex);
+                            if (!this.plugin.phonModel) this.plugin.phonModel = newPhonModel(allPh.map(p => p.symbol));
+                            for (let ep = 0; ep < 8; ep++) trainOnExample(ex, this.plugin.phonModel!, this.phon);
+                            void this.plugin.saveSettings();
+                            new Notice('Stress corrected — model updated!');
+                            tryWord();
+                        });
+                    });
+                } else {
+                    tryResult.createEl('p', { cls: 'rw-phon-hint', text: 'Single syllable word — no stress to predict.' });
+                }
+            } else {
+                const needed = Math.max(0, 2 - this.plugin.phonExamples.length);
+                tryResult.createEl('p', { cls: 'rw-empty', text: `Add ${needed} more example${needed !== 1 ? 's' : ''} by clicking syllables below to train the network.` });
+                if (sylls.length > 1) {
+                    const stressRow = tryResult.createEl('div', { cls: 'rw-phon-stress-row' });
+                    stressRow.createEl('span', { cls: 'rw-label', text: 'Mark stressed syllable: ' });
+                    syllTokens.forEach((syll, si) => {
+                        const btn = stressRow.createEl('button', {
+                            cls: 'rw-btn rw-btn-sm rw-phon-syll',
+                            text: syll.join(''),
+                        });
+                        btn.addEventListener('click', () => {
+                            const ex: PronEx = { word: w, sylls: syllTokens, stress: si };
+                            this.plugin.phonExamples.push(ex);
+                            if (!this.plugin.phonModel) this.plugin.phonModel = newPhonModel(allPh.map(p => p.symbol));
+                            for (let ep = 0; ep < 8; ep++) trainOnExample(ex, this.plugin.phonModel!, this.phon);
+                            void this.plugin.saveSettings();
+                            new Notice(`Saved! ${Math.max(0, 2 - this.plugin.phonExamples.length)} example${this.plugin.phonExamples.length < 2 ? 's' : ''} to go.`);
+                            tryWord();
+                        });
+                    });
+                }
+            }
+
+            if (this.phon.mode === 'strict' && unknown.length > 0)
+                tryResult.createEl('p', { cls: 'rw-phon-warn', text: `Unknown sounds: ${[...new Set(unknown)].join(', ')} — add them to your inventory above.` });
+
+            // Banned cluster check
+            const wordStr = tokens.join('');
+            const hits    = this.phon.banned.filter(b => b && wordStr.includes(b));
+            if (hits.length)
+                tryResult.createEl('p', { cls: 'rw-phon-warn', text: `Banned cluster${hits.length > 1 ? 's' : ''}: ${hits.join(', ')}` });
+        };
+
+        tryInput.addEventListener('input', tryWord);
+
+        el.createEl('div', { cls: 'rw-divider' });
+
+        // ── Phoneme map ───────────────────────────────────────────────────────
+        const mapSection = el.createEl('div', { cls: 'rw-phon-section' });
+        mapSection.createEl('p', { cls: 'rw-label', text: 'Phoneme map' });
+
+        const model = this.plugin.phonModel;
+        if (model && this.plugin.phonExamples.length >= 5) {
+            mapSection.createEl('p', { cls: 'rw-subtitle', text: 'Phonemes that behave similarly in stress patterns cluster together. Circle = vowel, diamond = consonant.' });
+            const allPh    = [...this.phon.vowels, ...this.phon.consonants];
+            const vowelSet = new Set(this.phon.vowels.map(v => v.symbol));
+            const withEmb  = allPh.filter(ph => model.E[ph.symbol]);
+
+            if (withEmb.length >= 3) {
+                const vecs   = withEmb.map(ph => model.E[ph.symbol]);
+                const coords = pca2d(vecs);
+                const xs = coords.map(c => c[0]), ys = coords.map(c => c[1]);
+                const minX = Math.min(...xs), maxX = Math.max(...xs);
+                const minY = Math.min(...ys), maxY = Math.max(...ys);
+                const rX = maxX - minX || 1, rY = maxY - minY || 1;
+                const mapX = (x: number) => 20 + ((x - minX) / rX) * 180;
+                const mapY = (y: number) => 20 + ((y - minY) / rY) * 150;
+
+                const svgEl = document.createElementNS(SVGNS, 'svg') as SVGSVGElement;
+                svgEl.setAttribute('width', '220'); svgEl.setAttribute('height', '200');
+                svgEl.setAttribute('class', 'rw-phon-map');
+
+                withEmb.forEach((ph, i) => {
+                    const x = mapX(coords[i][0]), y = mapY(coords[i][1]);
+                    const isV = vowelSet.has(ph.symbol);
+                    if (isV) {
+                        const c = document.createElementNS(SVGNS, 'circle') as SVGCircleElement;
+                        c.setAttribute('cx', String(x)); c.setAttribute('cy', String(y));
+                        c.setAttribute('r', '6'); c.setAttribute('class', 'rw-node-root');
+                        svgEl.appendChild(c);
+                    } else {
+                        const r = document.createElementNS(SVGNS, 'rect') as SVGRectElement;
+                        r.setAttribute('x', String(x - 5)); r.setAttribute('y', String(y - 5));
+                        r.setAttribute('width', '10'); r.setAttribute('height', '10');
+                        r.setAttribute('transform', `rotate(45,${x},${y})`);
+                        r.setAttribute('class', 'rw-node-word');
+                        svgEl.appendChild(r);
+                    }
+                    const t = document.createElementNS(SVGNS, 'text') as SVGTextElement;
+                    t.setAttribute('x', String(x)); t.setAttribute('y', String(y - 10));
+                    t.setAttribute('text-anchor', 'middle'); t.setAttribute('class', 'rw-graph-label');
+                    t.textContent = `${ph.symbol} (${ph.pron})`;
+                    svgEl.appendChild(t);
+                });
+                mapSection.appendChild(svgEl);
+            } else {
+                mapSection.createEl('p', { cls: 'rw-empty', text: 'Not enough phonemes with trained embeddings yet.' });
+            }
+        } else {
+            const needed = Math.max(0, 5 - this.plugin.phonExamples.length);
+            mapSection.createEl('p', { cls: 'rw-empty', text: `Map appears after ${needed} more stress example${needed !== 1 ? 's' : ''}. Use "Try a word" to add them.` });
+        }
+
+        el.createEl('div', { cls: 'rw-divider' });
+
+        // ── Notes ─────────────────────────────────────────────────────────────
+        const notesSection = el.createEl('div', { cls: 'rw-phon-section' });
+        notesSection.createEl('p', { cls: 'rw-label', text: 'Notes' });
+        const notesArea = notesSection.createEl('textarea', { cls: 'rw-textarea', attr: { placeholder: 'Free-form phonology notes…', rows: '3' } });
+        notesArea.value = this.phon.notes;
+        notesArea.addEventListener('change', () => { this.phon.notes = notesArea.value; savePhon(); });
+
+        // ── Observations ──────────────────────────────────────────────────────
+        const obs = inferPhono(this.words, this.phon);
+        if (obs.length) {
+            el.createEl('div', { cls: 'rw-divider' });
+            const obsSection = el.createEl('div', { cls: 'rw-phon-section' });
+            obsSection.createEl('p', { cls: 'rw-label', text: 'Phonotactics observations' });
+            obsSection.createEl('p', { cls: 'rw-subtitle', text: 'Automatically inferred from your word list.' });
+            const obsList = obsSection.createEl('ul', { cls: 'rw-obs-list' });
+            obs.forEach(o => obsList.createEl('li', { text: o }));
+        }
+
+        // ── Training info ─────────────────────────────────────────────────────
+        if (this.plugin.phonExamples.length > 0) {
+            el.createEl('div', { cls: 'rw-divider' });
+            const trainSection = el.createEl('div', { cls: 'rw-phon-section' });
+            trainSection.createEl('p', { cls: 'rw-label', text: 'Training data' });
+            trainSection.createEl('p', { cls: 'rw-subtitle', text: `${this.plugin.phonExamples.length} stress example${this.plugin.phonExamples.length !== 1 ? 's' : ''} saved.` });
+
+            const runTrainBtn = trainSection.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Re-train (50 epochs)' });
+            runTrainBtn.addEventListener('click', () => {
+                if (!this.plugin.phonModel) {
+                    const allPh = [...this.phon.vowels, ...this.phon.consonants];
+                    this.plugin.phonModel = newPhonModel(allPh.map(p => p.symbol));
+                }
+                batchTrain(this.plugin.phonExamples, this.plugin.phonModel!, this.phon, 50);
+                void this.plugin.saveSettings();
+                new Notice('Re-training complete!');
+            });
+
+            const clearBtn = trainSection.createEl('button', { cls: 'rw-btn rw-btn-sm rw-btn-danger', text: 'Clear training data' });
+            clearBtn.style.marginLeft = '8px';
+            clearBtn.addEventListener('click', () => {
+                this.plugin.phonExamples = [];
+                this.plugin.phonModel    = null;
+                void this.plugin.saveSettings();
+                new Notice('Training data cleared.');
+                this.render();
+            });
+        }
     }
 }
 
