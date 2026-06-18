@@ -879,6 +879,28 @@
 
 .rw-btn-ml { margin-left: 8px; }
 
+.rw-phon-syll-display {
+    font-family: var(--font-monospace);
+    font-size: 1.05em;
+    padding: 1px 3px;
+    border-radius: 3px;
+}
+
+.rw-phon-syll-display.is-stressed {
+    font-weight: 700;
+    color: var(--text-accent);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
+}
+
+.rw-phon-reading {
+    font-size: 0.82em;
+    color: var(--text-muted);
+    font-style: italic;
+    margin-left: 4px;
+}
+
 .rw-phon-corr-row {
     display: flex;
     align-items: center;

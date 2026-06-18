@@ -411,12 +411,31 @@ function makeSyllables(syllTokens: string[][], phon: PhonologyData): Syllable[] 
     });
 }
 
-// Build pronunciation string: 'VEH-lee-oo style
-function phonReconstruct(syllTokens: string[][], stressIdx: number, phon: PhonologyData): string {
+// Render syllables as styled spans — stressed syllable is bold and accent-colored
+function renderSyllableDisplay(parent: HTMLElement, syllTokens: string[][], stressIdx: number) {
+    syllTokens.forEach((syll, si) => {
+        if (si > 0) parent.createEl('span', { cls: 'rw-phon-dot', text: '-' });
+        parent.createEl('span', {
+            cls: 'rw-phon-syll-display' + (si === stressIdx ? ' is-stressed' : ''),
+            text: syll.join(''),
+        });
+    });
+}
+
+// Build a pronunciation notation string using raw phoneme symbols.
+// Apostrophe goes before the stressed syllable: vel-'iu
+function phonReconstruct(syllTokens: string[][], stressIdx: number): string {
+    return syllTokens.map((syll, si) =>
+        (si === stressIdx ? "'" : '') + syll.join('')
+    ).join('-');
+}
+
+// Build a "sounds like" reading using pron labels, e.g. "veh·ee·oo"
+function phonPronReading(syllTokens: string[][], stressIdx: number, phon: PhonologyData): string {
     const allPh = [...phon.vowels, ...phon.consonants];
     return syllTokens.map((syll, si) => {
-        const syllStr = syll.map(p => allPh.find(x => x.symbol === p)?.pron ?? p).join('');
-        return (si === stressIdx ? "'" : '') + syllStr;
+        const reading = syll.map(p => allPh.find(x => x.symbol === p)?.pron ?? p).join('');
+        return si === stressIdx ? reading.toUpperCase() : reading;
     }).join('-');
 }
 
@@ -1073,11 +1092,12 @@ class RootweaveView extends ItemView {
                     const model = this.plugin.phonModel;
                     if (model && sylls.length > 0 && this.plugin.phonExamples.length >= 2) {
                         const { stressIdx, confidence } = predictStress(sylls, model);
-                        const pron = phonReconstruct(syllTokens, stressIdx, this.phon);
+                        const reading = phonPronReading(syllTokens, stressIdx, this.phon);
                         const confPct = Math.round(confidence * 100);
                         const confCls = confidence > 0.75 ? 'rw-conf-high' : confidence > 0.45 ? 'rw-conf-mid' : 'rw-conf-low';
                         const pronRow = phonEl.createEl('div', { cls: 'rw-phon-pron-row' });
-                        pronRow.createEl('span', { cls: 'rw-phon-pron-text', text: `/${pron}/` });
+                        renderSyllableDisplay(pronRow, syllTokens, stressIdx);
+                        pronRow.createEl('span', { cls: 'rw-phon-reading', text: reading });
                         pronRow.createEl('span', { cls: `rw-conf ${confCls}`, text: `${confPct}%` });
 
                         if (sylls.length > 1) {
@@ -1503,7 +1523,7 @@ class RootweaveView extends ItemView {
         const tryInput  = trySection.createEl('input', { cls: 'rw-input rw-input-lg', attr: { type: 'text', placeholder: 'Type a word…' } });
         const tryResult = trySection.createEl('div',   { cls: 'rw-phon-try-result' });
 
-        const tryWord = () => {
+        const tryWord = (forcedStress?: number) => {
             tryResult.empty();
             const w = tryInput.value.trim().toLowerCase();
             if (!w) return;
@@ -1553,20 +1573,27 @@ class RootweaveView extends ItemView {
                     batchTrain(this.plugin.phonExamples, m, this.phon, 10);
                 void this.plugin.saveSettings();
                 new Notice('Correction saved!');
-                tryWord();
+                // Pass stressIdx directly so re-render never has to look it up
+                tryWord(stressIdx);
             };
 
-            const activeStress = override?.stress
-                ?? (model && this.plugin.phonExamples.length >= 2
-                    ? predictStress(sylls, model).stressIdx
-                    : null);
+            // forcedStress bypasses all lookups — set by submitCorrection for instant display
+            const activeStress = forcedStress !== undefined
+                ? forcedStress
+                : (override?.stress
+                    ?? (model && this.plugin.phonExamples.length >= 2
+                        ? predictStress(sylls, model).stressIdx
+                        : null));
+            const isOverride = forcedStress !== undefined || !!override;
 
             if (activeStress !== null && sylls.length > 0) {
-                const pron    = phonReconstruct(syllTokens, activeStress, this.phon);
+                const pron    = phonReconstruct(syllTokens, activeStress);
+                const reading = phonPronReading(syllTokens, activeStress, this.phon);
                 const pronRow = tryResult.createEl('div', { cls: 'rw-phon-pron-row' });
-                pronRow.createEl('span', { cls: 'rw-phon-pron-text', text: `/${pron}/` });
+                renderSyllableDisplay(pronRow, syllTokens, activeStress);
+                pronRow.createEl('span', { cls: 'rw-phon-reading', text: reading });
 
-                if (override) {
+                if (isOverride) {
                     pronRow.createEl('span', { cls: 'rw-conf rw-conf-high', text: '✓ corrected' });
                 } else if (model) {
                     const { confidence } = predictStress(sylls, model);
@@ -1577,14 +1604,14 @@ class RootweaveView extends ItemView {
 
                 if (sylls.length > 1) {
                     const corrRow = tryResult.createEl('div', { cls: 'rw-phon-corr-row' });
-                    corrRow.createEl('span', { cls: 'rw-label', text: override ? 'Change: ' : 'Correct: ' });
+                    corrRow.createEl('span', { cls: 'rw-label', text: isOverride ? 'Change: ' : 'Correct: ' });
                     const corrIn = corrRow.createEl('input', {
                         cls: 'rw-input rw-phon-corr-input',
                         attr: { type: 'text', value: pron, placeholder: `'syll-syll  (apostrophe = stress)` },
                     });
                     const applyCorr = () => {
                         const si = parseStressNotation(corrIn.value, sylls.length);
-                        if (si === null) { new Notice(`Put ' before the stressed syllable, e.g. ${pron}`); return; }
+                        if (si === null) { new Notice(`Put ' before the stressed syllable, e.g. '${syllTokens[0].join('')}-${syllTokens[1]?.join('') ?? ''}`); return; }
                         submitCorrection(si);
                     };
                     corrIn.addEventListener('keydown', e => { if (e.key === 'Enter') applyCorr(); });
