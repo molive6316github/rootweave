@@ -1668,7 +1668,7 @@ class RootweaveView extends ItemView {
                 tryResult.createEl('p', { cls: 'rw-phon-warn', text: `Banned cluster${hits.length > 1 ? 's' : ''}: ${hits.join(', ')}` });
         };
 
-        tryInput.addEventListener('input', tryWord);
+        tryInput.addEventListener('input', () => tryWord());
 
         el.createEl('div', { cls: 'rw-divider' });
 
