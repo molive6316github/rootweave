@@ -423,7 +423,7 @@ function nnRand(n: number, fi: number, fo: number): number[] {
     const s = Math.sqrt(2 / (fi + fo));
     return Array.from({ length: n }, () => (Math.random() * 2 - 1) * s);
 }
-function nnZero(n: number): number[] { return new Array(n).fill(0); }
+function nnZero(n: number): number[] { return Array.from({ length: n }, () => 0); }
 
 // Dense layer: output[j] = b[j] + Σ_i W[i*outD+j] * x[i]
 function matVec(W: number[], x: number[], inD: number, outD: number, b: number[]): number[] {
@@ -437,8 +437,8 @@ function matVec(W: number[], x: number[], inD: number, outD: number, b: number[]
 function matVecBack(
     delta: number[], x: number[], W: number[], inD: number, outD: number
 ): { gW: number[]; gb: number[]; dx: number[] } {
-    const gW = new Array(inD * outD).fill(0);
-    const dx = new Array(inD).fill(0);
+    const gW = Array.from({ length: inD * outD }, () => 0);
+    const dx = Array.from({ length: inD }, () => 0);
     for (let i = 0; i < inD; i++)
         for (let j = 0; j < outD; j++) {
             gW[i * outD + j] = x[i] * delta[j];
@@ -500,7 +500,7 @@ function syllFeats(syll: Syllable, idx: number, total: number, m: PhonModel): nu
         embeds.reduce((s, e) => s + e[j], 0) / (embeds.length || 1)
     );
     let onset = 0;
-    for (const p of syll.phonemes) { if (!syll.isHeavy && onset === 0) break; onset++; }
+    for (const _p of syll.phonemes) { if (!syll.isHeavy && onset === 0) break; onset++; }
     return [
         ...avgEmb,
         total > 1 ? idx / (total - 1) : 0,
@@ -721,7 +721,7 @@ function forceLayout(nodes: GNode[], edges: GEdge[], W: number, H: number) {
 }
 
 const SVGNS = 'http://www.w3.org/2000/svg';
-const mksvg  = (tag: string) => document.createElementNS(SVGNS, tag);
+const mksvg  = (tag: string) => activeDocument.createElementNS(SVGNS, tag);
 
 // ─── Plugin ───────────────────────────────────────────────────────────────────
 
@@ -1055,10 +1055,9 @@ class RootweaveView extends ItemView {
                                 btn.addEventListener('click', () => {
                                     const ex: PronEx = { word: word.toLowerCase(), sylls: syllTokens, stress: si };
                                     this.plugin.phonExamples.push(ex);
-                                    if (!this.plugin.phonModel) {
-                                        this.plugin.phonModel = newPhonModel(allPhonemes.map(p => p.symbol));
-                                    }
-                                    for (let ep = 0; ep < 8; ep++) trainOnExample(ex, this.plugin.phonModel!, this.phon);
+                                    const m = this.plugin.phonModel ?? newPhonModel(allPhonemes.map(p => p.symbol));
+                                    this.plugin.phonModel = m;
+                                    for (let ep = 0; ep < 8; ep++) trainOnExample(ex, m, this.phon);
                                     void this.plugin.saveSettings();
                                     analyze();
                                 });
@@ -1513,8 +1512,9 @@ class RootweaveView extends ItemView {
                         btn.addEventListener('click', () => {
                             const ex: PronEx = { word: w, sylls: syllTokens, stress: si };
                             this.plugin.phonExamples.push(ex);
-                            if (!this.plugin.phonModel) this.plugin.phonModel = newPhonModel(allPh.map(p => p.symbol));
-                            for (let ep = 0; ep < 8; ep++) trainOnExample(ex, this.plugin.phonModel!, this.phon);
+                            const m = this.plugin.phonModel ?? newPhonModel(allPh.map(p => p.symbol));
+                            this.plugin.phonModel = m;
+                            for (let ep = 0; ep < 8; ep++) trainOnExample(ex, m, this.phon);
                             void this.plugin.saveSettings();
                             new Notice('Stress corrected — model updated!');
                             tryWord();
@@ -1537,8 +1537,9 @@ class RootweaveView extends ItemView {
                         btn.addEventListener('click', () => {
                             const ex: PronEx = { word: w, sylls: syllTokens, stress: si };
                             this.plugin.phonExamples.push(ex);
-                            if (!this.plugin.phonModel) this.plugin.phonModel = newPhonModel(allPh.map(p => p.symbol));
-                            for (let ep = 0; ep < 8; ep++) trainOnExample(ex, this.plugin.phonModel!, this.phon);
+                            const m = this.plugin.phonModel ?? newPhonModel(allPh.map(p => p.symbol));
+                            this.plugin.phonModel = m;
+                            for (let ep = 0; ep < 8; ep++) trainOnExample(ex, m, this.phon);
                             void this.plugin.saveSettings();
                             new Notice(`Saved! ${Math.max(0, 2 - this.plugin.phonExamples.length)} example${this.plugin.phonExamples.length < 2 ? 's' : ''} to go.`);
                             tryWord();
@@ -1582,7 +1583,7 @@ class RootweaveView extends ItemView {
                 const mapX = (x: number) => 20 + ((x - minX) / rX) * 180;
                 const mapY = (y: number) => 20 + ((y - minY) / rY) * 150;
 
-                const svgEl = document.createElementNS(SVGNS, 'svg') as SVGSVGElement;
+                const svgEl = activeDocument.createElementNS(SVGNS, 'svg');
                 svgEl.setAttribute('width', '220'); svgEl.setAttribute('height', '200');
                 svgEl.setAttribute('class', 'rw-phon-map');
 
@@ -1590,19 +1591,19 @@ class RootweaveView extends ItemView {
                     const x = mapX(coords[i][0]), y = mapY(coords[i][1]);
                     const isV = vowelSet.has(ph.symbol);
                     if (isV) {
-                        const c = document.createElementNS(SVGNS, 'circle') as SVGCircleElement;
+                        const c = activeDocument.createElementNS(SVGNS, 'circle');
                         c.setAttribute('cx', String(x)); c.setAttribute('cy', String(y));
                         c.setAttribute('r', '6'); c.setAttribute('class', 'rw-node-root');
                         svgEl.appendChild(c);
                     } else {
-                        const r = document.createElementNS(SVGNS, 'rect') as SVGRectElement;
+                        const r = activeDocument.createElementNS(SVGNS, 'rect');
                         r.setAttribute('x', String(x - 5)); r.setAttribute('y', String(y - 5));
                         r.setAttribute('width', '10'); r.setAttribute('height', '10');
                         r.setAttribute('transform', `rotate(45,${x},${y})`);
                         r.setAttribute('class', 'rw-node-word');
                         svgEl.appendChild(r);
                     }
-                    const t = document.createElementNS(SVGNS, 'text') as SVGTextElement;
+                    const t = activeDocument.createElementNS(SVGNS, 'text');
                     t.setAttribute('x', String(x)); t.setAttribute('y', String(y - 10));
                     t.setAttribute('text-anchor', 'middle'); t.setAttribute('class', 'rw-graph-label');
                     t.textContent = `${ph.symbol} (${ph.pron})`;
@@ -1650,13 +1651,14 @@ class RootweaveView extends ItemView {
                     const allPh = [...this.phon.vowels, ...this.phon.consonants];
                     this.plugin.phonModel = newPhonModel(allPh.map(p => p.symbol));
                 }
-                batchTrain(this.plugin.phonExamples, this.plugin.phonModel!, this.phon, 50);
+                const m = this.plugin.phonModel ?? newPhonModel([...this.phon.vowels, ...this.phon.consonants].map(p => p.symbol));
+                this.plugin.phonModel = m;
+                batchTrain(this.plugin.phonExamples, m, this.phon, 50);
                 void this.plugin.saveSettings();
                 new Notice('Re-training complete!');
             });
 
-            const clearBtn = trainSection.createEl('button', { cls: 'rw-btn rw-btn-sm rw-btn-danger', text: 'Clear training data' });
-            clearBtn.style.marginLeft = '8px';
+            const clearBtn = trainSection.createEl('button', { cls: 'rw-btn rw-btn-sm rw-btn-danger rw-btn-ml', text: 'Clear training data' });
             clearBtn.addEventListener('click', () => {
                 this.plugin.phonExamples = [];
                 this.plugin.phonModel    = null;
@@ -1718,7 +1720,7 @@ class GraphView extends ItemView {
 
         const canvas = el.createEl('div', { cls: 'rw-graph-canvas' });
         // Wait one frame so the container has layout dimensions before we measure it
-        requestAnimationFrame(() => { this.buildGraph(canvas); });
+        window.requestAnimationFrame(() => { this.buildGraph(canvas); });
     }
 
     private buildGraph(container: HTMLElement) {

@@ -1,6 +1,6 @@
 {
   "name": "rootweave",
-  "version": "1.7.0",
+  "version": "1.7.1",
   "description": "Obsidian plugin for conlang worldbuilders",
   "main": "main.js",
   "scripts": {
