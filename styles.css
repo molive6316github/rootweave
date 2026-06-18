@@ -878,3 +878,15 @@
 }
 
 .rw-btn-ml { margin-left: 8px; }
+
+.rw-phon-corr-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 6px 0 4px;
+}
+
+.rw-phon-corr-input {
+    font-family: var(--font-monospace);
+    width: 160px;
+}

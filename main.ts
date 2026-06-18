@@ -102,12 +102,15 @@ interface PhonModel {
     mW3: number[]; vW3: number[];
     mb3: number[]; vb3: number[];
     t:   number;
+    version: number;
 }
 
-const E_DIM = 8;
-const H1    = 16;
-const H2    = 8;
-const IN    = E_DIM + 6;
+const E_DIM       = 8;
+const SYLL_F      = E_DIM + 6;  // features for one syllable (14)
+const H1          = 64;          // hidden layer 1 (wider for context window)
+const H2          = 32;          // hidden layer 2
+const IN          = SYLL_F * 3;  // prev + curr + next context (42)
+const MODEL_VER   = 2;           // bump when architecture changes → auto-reinit
 
 const DEFAULT_PHONOLOGY: PhonologyData = {
     vowels: [
@@ -483,6 +486,7 @@ function newPhonModel(phonemeSymbols: string[]): PhonModel {
         mW3: nnZero(H2),      vW3: nnZero(H2),
         mb3: nnZero(1),       vb3: nnZero(1),
         t: 0,
+        version: MODEL_VER,
     };
 }
 
@@ -512,6 +516,23 @@ function syllFeats(syll: Syllable, idx: number, total: number, m: PhonModel): nu
     ];
 }
 
+// 42-dim context window: [prev_feats, curr_feats, next_feats]
+// This lets the network learn stress from contrast between syllables, not just each syllable alone.
+function contextFeats(sylls: Syllable[], idx: number, m: PhonModel): number[] {
+    const n    = sylls.length;
+    const zero = Array.from({ length: SYLL_F }, () => 0);
+    const prev = idx > 0     ? syllFeats(sylls[idx - 1], idx - 1, n, m) : zero;
+    const curr =               syllFeats(sylls[idx],     idx,     n, m);
+    const next = idx < n - 1 ? syllFeats(sylls[idx + 1], idx + 1, n, m) : zero;
+    return [...prev, ...curr, ...next];
+}
+
+// Clip gradient norm to prevent exploding gradients in the wider network
+function clipGrad(g: number[], maxNorm = 5): void {
+    const norm = Math.sqrt(g.reduce((s, x) => s + x * x, 0));
+    if (norm > maxNorm) { const scale = maxNorm / norm; for (let i = 0; i < g.length; i++) g[i] *= scale; }
+}
+
 function nnForward(feat: number[], m: PhonModel): { z1: number[]; h1: number[]; z2: number[]; h2: number[]; score: number } {
     const z1 = matVec(m.W1, feat, IN, H1, m.b1);
     const h1 = z1.map(v => Math.max(0, v));
@@ -525,7 +546,7 @@ function predictStress(
     sylls: Syllable[], m: PhonModel
 ): { probs: number[]; stressIdx: number; confidence: number } {
     if (sylls.length === 1) return { probs: [1], stressIdx: 0, confidence: 1 };
-    const scores = sylls.map((s, i) => nnForward(syllFeats(s, i, sylls.length, m), m).score);
+    const scores = sylls.map((_, i) => nnForward(contextFeats(sylls, i, m), m).score);
     const probs  = nnSoftmax(scores);
     const stressIdx = probs.indexOf(Math.max(...probs));
     const H    = -probs.reduce((s, p) => s + (p > 1e-9 ? p * Math.log(p) : 0), 0);
@@ -533,11 +554,11 @@ function predictStress(
     return { probs, stressIdx, confidence: maxH > 0 ? 1 - H / maxH : 1 };
 }
 
-function trainOnExample(ex: PronEx, m: PhonModel, phon: PhonologyData, lr = 0.008) {
+function trainOnExample(ex: PronEx, m: PhonModel, phon: PhonologyData, lr = 0.006) {
     const sylls = makeSyllables(ex.sylls, phon);
     if (sylls.length <= 1) return;
     m.t++;
-    const feats = sylls.map((s, i) => syllFeats(s, i, sylls.length, m));
+    const feats = sylls.map((_, i) => contextFeats(sylls, i, m));
     const fwds  = feats.map(f => nnForward(f, m));
     const probs = nnSoftmax(fwds.map(f => f.score));
     const dScores = probs.map((p, i) => p - (i === ex.stress ? 1 : 0));
@@ -562,8 +583,9 @@ function trainOnExample(ex: PronEx, m: PhonModel, phon: PhonologyData, lr = 0.00
         for (let i = 0; i < ab2.length; i++) ab2[i] += gb2[i];
         for (let i = 0; i < aW3.length; i++) aW3[i] += gW3[i];
         for (let i = 0; i < ab3.length; i++) ab3[i] += gb3[i];
-        void gb3; // suppress unused-var warning
-        const dEmb = dFeat.slice(0, E_DIM);
+        void gb3;
+        // Embedding gradient comes from the current-syllable slot (indices SYLL_F..SYLL_F+E_DIM)
+        const dEmb = dFeat.slice(SYLL_F, SYLL_F + E_DIM);
         const nP   = syll.phonemes.length || 1;
         syll.phonemes.forEach(p => {
             if (!aE[p]) aE[p] = nnZero(E_DIM);
@@ -571,10 +593,13 @@ function trainOnExample(ex: PronEx, m: PhonModel, phon: PhonologyData, lr = 0.00
         });
     });
 
-    const L2 = 0.0003;
+    const L2 = 0.0001;
     for (let i = 0; i < aW1.length; i++) aW1[i] += L2 * m.W1[i];
     for (let i = 0; i < aW2.length; i++) aW2[i] += L2 * m.W2[i];
     for (let i = 0; i < aW3.length; i++) aW3[i] += L2 * m.W3[i];
+
+    clipGrad(aW1); clipGrad(aW2); clipGrad(aW3);
+    clipGrad(ab1); clipGrad(ab2); clipGrad(ab3);
 
     adamStep(m.W1, aW1, m.mW1, m.vW1, m.t, lr);
     adamStep(m.b1, ab1, m.mb1, m.vb1, m.t, lr);
@@ -584,8 +609,18 @@ function trainOnExample(ex: PronEx, m: PhonModel, phon: PhonologyData, lr = 0.00
     adamStep(m.b3, ab3, m.mb3, m.vb3, m.t, lr);
     Object.entries(aE).forEach(([p, grad]) => {
         phonGetEmbed(p, m);
+        clipGrad(grad);
         adamStep(m.E[p], grad, m.mE[p], m.vE[p], m.t, lr * 0.5);
     });
+}
+
+// Parse typed stress notation: "'vel-i-u" or "vel-'i-u" → syllable index of stressed part.
+// Splits on -, ·, ., or space. Returns null if syllable count doesn't match.
+function parseStressNotation(text: string, syllCount: number): number | null {
+    const parts = text.trim().split(/[-·.\s]+/).map(s => s.trim()).filter(Boolean);
+    if (parts.length !== syllCount) return null;
+    const idx = parts.findIndex(p => p.startsWith("'") || p.startsWith('ˈ'));
+    return idx >= 0 ? idx : null;
 }
 
 function batchTrain(examples: PronEx[], m: PhonModel, phon: PhonologyData, epochs = 40) {
@@ -805,9 +840,11 @@ export default class RootweavePlugin extends Plugin {
 
     async loadSettings() {
         const data = (await this.loadData() as Record<string, unknown>) ?? {};
-        this.settings    = { language: (data['language'] as string) ?? DEFAULT_SETTINGS.language };
-        this.phonModel   = (data['phonModel'] as PhonModel | null | undefined) ?? null;
+        this.settings     = { language: (data['language'] as string) ?? DEFAULT_SETTINGS.language };
         this.phonExamples = (data['phonExamples'] as PronEx[] | undefined) ?? [];
+        const saved = (data['phonModel'] as PhonModel | null | undefined) ?? null;
+        // Discard models from older architectures — examples are kept and will retrain
+        this.phonModel = (saved && saved.version === MODEL_VER) ? saved : null;
     }
 
     async saveSettings() {
@@ -1348,6 +1385,15 @@ class RootweaveView extends ItemView {
     // ── Phonology tab ─────────────────────────────────────────────────────────
 
     private renderPhonology(el: HTMLElement) {
+        // Auto-retrain after architecture upgrade (model discarded but examples kept)
+        if (!this.plugin.phonModel && this.plugin.phonExamples.length > 0) {
+            const allPh = [...this.phon.vowels, ...this.phon.consonants];
+            const m = newPhonModel(allPh.map(p => p.symbol));
+            this.plugin.phonModel = m;
+            batchTrain(this.plugin.phonExamples, m, this.phon, 60);
+            void this.plugin.saveSettings();
+        }
+
         const savePhon = () => { void this.plugin.savePhonology(this.phon); };
 
         const renderPhonRow = (
@@ -1491,6 +1537,18 @@ class RootweaveView extends ItemView {
             }
             const model = this.plugin.phonModel;
 
+            // Shared correction handler — used by both typed input and click buttons
+            const submitCorrection = (stressIdx: number) => {
+                const ex: PronEx = { word: w, sylls: syllTokens, stress: stressIdx };
+                this.plugin.phonExamples.push(ex);
+                const m = this.plugin.phonModel ?? newPhonModel(allPh.map(p => p.symbol));
+                this.plugin.phonModel = m;
+                for (let ep = 0; ep < 10; ep++) trainOnExample(ex, m, this.phon);
+                void this.plugin.saveSettings();
+                new Notice('Correction saved — model updated!');
+                tryWord();
+            };
+
             if (model && this.plugin.phonExamples.length >= 2) {
                 const { stressIdx, confidence } = predictStress(sylls, model);
                 const pron     = phonReconstruct(syllTokens, stressIdx, this.phon);
@@ -1502,48 +1560,64 @@ class RootweaveView extends ItemView {
                 pronRow.createEl('span', { cls: `rw-conf ${confCls}`, text: `${confPct}% confident` });
 
                 if (sylls.length > 1) {
+                    // Typed correction input pre-filled with current prediction
+                    const corrRow = tryResult.createEl('div', { cls: 'rw-phon-corr-row' });
+                    corrRow.createEl('span', { cls: 'rw-label', text: 'Correct: ' });
+                    const corrIn = corrRow.createEl('input', {
+                        cls: 'rw-input rw-phon-corr-input',
+                        attr: { type: 'text', value: pron, placeholder: `'syll-syll  (apostrophe = stress)` },
+                    });
+                    const applyCorr = () => {
+                        const si = parseStressNotation(corrIn.value, sylls.length);
+                        if (si === null) { new Notice(`Format: put ' before the stressed syllable, e.g. ${pron}`); return; }
+                        submitCorrection(si);
+                    };
+                    corrIn.addEventListener('keydown', e => { if (e.key === 'Enter') applyCorr(); });
+                    corrRow.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Submit' })
+                        .addEventListener('click', applyCorr);
+
+                    // Click buttons as visual alternative
                     const stressRow = tryResult.createEl('div', { cls: 'rw-phon-stress-row' });
-                    stressRow.createEl('span', { cls: 'rw-label', text: 'Stress (click to correct): ' });
+                    stressRow.createEl('span', { cls: 'rw-label', text: 'or click: ' });
                     syllTokens.forEach((syll, si) => {
                         const btn = stressRow.createEl('button', {
                             cls: 'rw-btn rw-btn-sm rw-phon-syll' + (si === stressIdx ? ' is-stressed' : ''),
                             text: syll.join(''),
                         });
-                        btn.addEventListener('click', () => {
-                            const ex: PronEx = { word: w, sylls: syllTokens, stress: si };
-                            this.plugin.phonExamples.push(ex);
-                            const m = this.plugin.phonModel ?? newPhonModel(allPh.map(p => p.symbol));
-                            this.plugin.phonModel = m;
-                            for (let ep = 0; ep < 8; ep++) trainOnExample(ex, m, this.phon);
-                            void this.plugin.saveSettings();
-                            new Notice('Stress corrected — model updated!');
-                            tryWord();
-                        });
+                        btn.addEventListener('click', () => submitCorrection(si));
                     });
                 } else {
-                    tryResult.createEl('p', { cls: 'rw-phon-hint', text: 'Single syllable word — no stress to predict.' });
+                    tryResult.createEl('p', { cls: 'rw-phon-hint', text: 'Single syllable — no stress to predict.' });
                 }
             } else {
-                const needed = Math.max(0, 2 - this.plugin.phonExamples.length);
-                tryResult.createEl('p', { cls: 'rw-empty', text: `Add ${needed} more example${needed !== 1 ? 's' : ''} by clicking syllables below to train the network.` });
                 if (sylls.length > 1) {
+                    const needed = Math.max(0, 2 - this.plugin.phonExamples.length);
+                    tryResult.createEl('p', { cls: 'rw-empty', text: `${needed} more example${needed !== 1 ? 's' : ''} needed to enable predictions.` });
+
+                    // Typed input for initial training examples
+                    const corrRow = tryResult.createEl('div', { cls: 'rw-phon-corr-row' });
+                    corrRow.createEl('span', { cls: 'rw-label', text: 'Type stress: ' });
+                    const corrIn = corrRow.createEl('input', {
+                        cls: 'rw-input rw-phon-corr-input',
+                        attr: { type: 'text', placeholder: `'syll-syll  (apostrophe = stress)` },
+                    });
+                    const applyCorr = () => {
+                        const si = parseStressNotation(corrIn.value, sylls.length);
+                        if (si === null) { new Notice(`Put ' before the stressed syllable and separate with -, e.g. '${syllTokens[0].join('')}-${syllTokens[1]?.join('') ?? ''}`); return; }
+                        submitCorrection(si);
+                    };
+                    corrIn.addEventListener('keydown', e => { if (e.key === 'Enter') applyCorr(); });
+                    corrRow.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Submit' })
+                        .addEventListener('click', applyCorr);
+
+                    // Click buttons as visual alternative
                     const stressRow = tryResult.createEl('div', { cls: 'rw-phon-stress-row' });
-                    stressRow.createEl('span', { cls: 'rw-label', text: 'Mark stressed syllable: ' });
+                    stressRow.createEl('span', { cls: 'rw-label', text: 'or click: ' });
                     syllTokens.forEach((syll, si) => {
-                        const btn = stressRow.createEl('button', {
+                        stressRow.createEl('button', {
                             cls: 'rw-btn rw-btn-sm rw-phon-syll',
                             text: syll.join(''),
-                        });
-                        btn.addEventListener('click', () => {
-                            const ex: PronEx = { word: w, sylls: syllTokens, stress: si };
-                            this.plugin.phonExamples.push(ex);
-                            const m = this.plugin.phonModel ?? newPhonModel(allPh.map(p => p.symbol));
-                            this.plugin.phonModel = m;
-                            for (let ep = 0; ep < 8; ep++) trainOnExample(ex, m, this.phon);
-                            void this.plugin.saveSettings();
-                            new Notice(`Saved! ${Math.max(0, 2 - this.plugin.phonExamples.length)} example${this.plugin.phonExamples.length < 2 ? 's' : ''} to go.`);
-                            tryWord();
-                        });
+                        }).addEventListener('click', () => submitCorrection(si));
                     });
                 }
             }
