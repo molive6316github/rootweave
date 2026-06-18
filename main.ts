@@ -1531,95 +1531,104 @@ class RootweaveView extends ItemView {
 
             if (sylls.length === 0) return;
 
-            // Get or create model
-            if (!this.plugin.phonModel && allPh.length > 0) {
+            if (!this.plugin.phonModel && allPh.length > 0)
                 this.plugin.phonModel = newPhonModel(allPh.map(p => p.symbol));
-            }
             const model = this.plugin.phonModel;
 
-            // Shared correction handler — used by both typed input and click buttons
+            // Stored corrections always win over the NN — gives instant reliable feedback
+            const override = [...this.plugin.phonExamples].reverse().find(ex => ex.word === w);
+
+            // Shared correction handler
             const submitCorrection = (stressIdx: number) => {
                 const ex: PronEx = { word: w, sylls: syllTokens, stress: stressIdx };
-                this.plugin.phonExamples.push(ex);
+                // Replace any previous correction for this exact word (no duplicates)
+                const prev = this.plugin.phonExamples.findIndex(e => e.word === w);
+                if (prev >= 0) this.plugin.phonExamples[prev] = ex;
+                else this.plugin.phonExamples.push(ex);
                 const m = this.plugin.phonModel ?? newPhonModel(allPh.map(p => p.symbol));
                 this.plugin.phonModel = m;
-                for (let ep = 0; ep < 10; ep++) trainOnExample(ex, m, this.phon);
+                // Focused high-LR pass on this correction, then sweep all examples
+                for (let ep = 0; ep < 20; ep++) trainOnExample(ex, m, this.phon, 0.02);
+                if (this.plugin.phonExamples.length <= 40)
+                    batchTrain(this.plugin.phonExamples, m, this.phon, 10);
                 void this.plugin.saveSettings();
-                new Notice('Correction saved — model updated!');
+                new Notice('Correction saved!');
                 tryWord();
             };
 
-            if (model && this.plugin.phonExamples.length >= 2) {
-                const { stressIdx, confidence } = predictStress(sylls, model);
-                const pron     = phonReconstruct(syllTokens, stressIdx, this.phon);
-                const confPct  = Math.round(confidence * 100);
-                const confCls  = confidence > 0.75 ? 'rw-conf-high' : confidence > 0.45 ? 'rw-conf-mid' : 'rw-conf-low';
+            const activeStress = override?.stress
+                ?? (model && this.plugin.phonExamples.length >= 2
+                    ? predictStress(sylls, model).stressIdx
+                    : null);
 
+            if (activeStress !== null && sylls.length > 0) {
+                const pron    = phonReconstruct(syllTokens, activeStress, this.phon);
                 const pronRow = tryResult.createEl('div', { cls: 'rw-phon-pron-row' });
                 pronRow.createEl('span', { cls: 'rw-phon-pron-text', text: `/${pron}/` });
-                pronRow.createEl('span', { cls: `rw-conf ${confCls}`, text: `${confPct}% confident` });
+
+                if (override) {
+                    pronRow.createEl('span', { cls: 'rw-conf rw-conf-high', text: '✓ corrected' });
+                } else if (model) {
+                    const { confidence } = predictStress(sylls, model);
+                    const confPct = Math.round(confidence * 100);
+                    const confCls = confidence > 0.75 ? 'rw-conf-high' : confidence > 0.45 ? 'rw-conf-mid' : 'rw-conf-low';
+                    pronRow.createEl('span', { cls: `rw-conf ${confCls}`, text: `${confPct}% confident` });
+                }
 
                 if (sylls.length > 1) {
-                    // Typed correction input pre-filled with current prediction
                     const corrRow = tryResult.createEl('div', { cls: 'rw-phon-corr-row' });
-                    corrRow.createEl('span', { cls: 'rw-label', text: 'Correct: ' });
+                    corrRow.createEl('span', { cls: 'rw-label', text: override ? 'Change: ' : 'Correct: ' });
                     const corrIn = corrRow.createEl('input', {
                         cls: 'rw-input rw-phon-corr-input',
                         attr: { type: 'text', value: pron, placeholder: `'syll-syll  (apostrophe = stress)` },
                     });
                     const applyCorr = () => {
                         const si = parseStressNotation(corrIn.value, sylls.length);
-                        if (si === null) { new Notice(`Format: put ' before the stressed syllable, e.g. ${pron}`); return; }
+                        if (si === null) { new Notice(`Put ' before the stressed syllable, e.g. ${pron}`); return; }
                         submitCorrection(si);
                     };
                     corrIn.addEventListener('keydown', e => { if (e.key === 'Enter') applyCorr(); });
                     corrRow.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Submit' })
                         .addEventListener('click', applyCorr);
 
-                    // Click buttons as visual alternative
-                    const stressRow = tryResult.createEl('div', { cls: 'rw-phon-stress-row' });
-                    stressRow.createEl('span', { cls: 'rw-label', text: 'or click: ' });
-                    syllTokens.forEach((syll, si) => {
-                        const btn = stressRow.createEl('button', {
-                            cls: 'rw-btn rw-btn-sm rw-phon-syll' + (si === stressIdx ? ' is-stressed' : ''),
-                            text: syll.join(''),
-                        });
-                        btn.addEventListener('click', () => submitCorrection(si));
-                    });
-                } else {
-                    tryResult.createEl('p', { cls: 'rw-phon-hint', text: 'Single syllable — no stress to predict.' });
-                }
-            } else {
-                if (sylls.length > 1) {
-                    const needed = Math.max(0, 2 - this.plugin.phonExamples.length);
-                    tryResult.createEl('p', { cls: 'rw-empty', text: `${needed} more example${needed !== 1 ? 's' : ''} needed to enable predictions.` });
-
-                    // Typed input for initial training examples
-                    const corrRow = tryResult.createEl('div', { cls: 'rw-phon-corr-row' });
-                    corrRow.createEl('span', { cls: 'rw-label', text: 'Type stress: ' });
-                    const corrIn = corrRow.createEl('input', {
-                        cls: 'rw-input rw-phon-corr-input',
-                        attr: { type: 'text', placeholder: `'syll-syll  (apostrophe = stress)` },
-                    });
-                    const applyCorr = () => {
-                        const si = parseStressNotation(corrIn.value, sylls.length);
-                        if (si === null) { new Notice(`Put ' before the stressed syllable and separate with -, e.g. '${syllTokens[0].join('')}-${syllTokens[1]?.join('') ?? ''}`); return; }
-                        submitCorrection(si);
-                    };
-                    corrIn.addEventListener('keydown', e => { if (e.key === 'Enter') applyCorr(); });
-                    corrRow.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Submit' })
-                        .addEventListener('click', applyCorr);
-
-                    // Click buttons as visual alternative
                     const stressRow = tryResult.createEl('div', { cls: 'rw-phon-stress-row' });
                     stressRow.createEl('span', { cls: 'rw-label', text: 'or click: ' });
                     syllTokens.forEach((syll, si) => {
                         stressRow.createEl('button', {
-                            cls: 'rw-btn rw-btn-sm rw-phon-syll',
+                            cls: 'rw-btn rw-btn-sm rw-phon-syll' + (si === activeStress ? ' is-stressed' : ''),
                             text: syll.join(''),
                         }).addEventListener('click', () => submitCorrection(si));
                     });
+                } else {
+                    tryResult.createEl('p', { cls: 'rw-phon-hint', text: 'Single syllable — no stress to predict.' });
                 }
+            } else if (sylls.length > 1) {
+                const needed = Math.max(0, 2 - this.plugin.phonExamples.length);
+                tryResult.createEl('p', { cls: 'rw-empty', text: `${needed} more example${needed !== 1 ? 's' : ''} needed to enable predictions.` });
+
+                const corrRow = tryResult.createEl('div', { cls: 'rw-phon-corr-row' });
+                corrRow.createEl('span', { cls: 'rw-label', text: 'Type stress: ' });
+                const corrIn = corrRow.createEl('input', {
+                    cls: 'rw-input rw-phon-corr-input',
+                    attr: { type: 'text', placeholder: `'syll-syll  (apostrophe = stress)` },
+                });
+                const applyCorr = () => {
+                    const si = parseStressNotation(corrIn.value, sylls.length);
+                    if (si === null) { new Notice(`Put ' before the stressed syllable, e.g. '${syllTokens[0].join('')}-${syllTokens[1]?.join('') ?? ''}`); return; }
+                    submitCorrection(si);
+                };
+                corrIn.addEventListener('keydown', e => { if (e.key === 'Enter') applyCorr(); });
+                corrRow.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Submit' })
+                    .addEventListener('click', applyCorr);
+
+                const stressRow = tryResult.createEl('div', { cls: 'rw-phon-stress-row' });
+                stressRow.createEl('span', { cls: 'rw-label', text: 'or click: ' });
+                syllTokens.forEach((syll, si) => {
+                    stressRow.createEl('button', {
+                        cls: 'rw-btn rw-btn-sm rw-phon-syll',
+                        text: syll.join(''),
+                    }).addEventListener('click', () => submitCorrection(si));
+                });
             }
 
             if (this.phon.mode === 'strict' && unknown.length > 0)
