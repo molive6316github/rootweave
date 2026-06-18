@@ -1,7 +1,7 @@
 {
   "id": "rootweave",
   "name": "Rootweave",
-  "version": "1.7.1",
+  "version": "1.7.2",
   "minAppVersion": "1.6.0",
   "description": "A conlang workspace for worldbuilders — manage roots, build words, validate grammar, and translate.",
   "author": "Max Oliver",
