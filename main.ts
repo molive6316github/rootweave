@@ -356,6 +356,21 @@ function importWords(template: string, text: string): Word[] {
         });
 }
 
+// Replace accented / special characters with plain ASCII equivalents
+function stripDiacritics(str: string): string {
+    // Manual mappings for characters that don't decompose via NFD
+    const manual: Record<string, string> = {
+        'æ':'ae','Æ':'AE','œ':'oe','Œ':'OE',
+        'ø':'o', 'Ø':'O', 'ł':'l', 'Ł':'L',
+        'ß':'ss','ð':'d', 'Ð':'D', 'þ':'th','Þ':'TH',
+        'ŋ':'n', 'Ŋ':'N', 'ĸ':'k', 'ŉ':"'n",
+    };
+    let s = str;
+    for (const from of Object.keys(manual)) s = s.split(from).join(manual[from]);
+    // NFD splits e.g. é → e + ́, then strip the combining marks
+    return s.normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
 // Mirror capitalisation of source onto target: "Hello" → Title, "HELLO" → UPPER
 function matchCase(source: string, target: string): string {
     if (!source || !target) return target;
@@ -2466,5 +2481,39 @@ class RootweaveSettingTab extends PluginSettingTab {
                     }).catch(e => new Notice(`Load failed: ${e}`));
                 }
             }));
+
+        // ── Cleanse ────────────────────────────────────────────────────────────
+        new Setting(containerEl).setName('Data tools').setHeading();
+
+        new Setting(containerEl)
+            .setName('Cleanse special characters')
+            .setDesc('Replace accented and non-ASCII letters in all roots and words with plain equivalents (e.g. Ñ→N, é→e, ü→u, æ→ae). Edits your files — make a backup first.')
+            .addButton(btn => btn
+                .setButtonText('Cleanse')
+                .setClass('mod-warning')
+                .onClick(() => {
+                    void Promise.all([
+                        this.plugin.loadRoots(),
+                        this.plugin.loadWords(),
+                    ]).then(([roots, words]) => {
+                        const cleanRoots = roots.map(r => ({
+                            ...r,
+                            root:       stripDiacritics(r.root),
+                            alternates: r.alternates.map((a: string) => stripDiacritics(a)),
+                        }));
+                        const cleanWords = words.map(w => ({
+                            ...w,
+                            word: stripDiacritics(w.word),
+                        }));
+                        void Promise.all([
+                            this.plugin.saveRoots(cleanRoots),
+                            this.plugin.saveWords(cleanWords),
+                        ]).then(() => {
+                            new Notice(`Cleansed ${roots.length} roots and ${words.length} words.`);
+                            void this.plugin.reloadView();
+                        });
+                    });
+                })
+            );
     }
 }
