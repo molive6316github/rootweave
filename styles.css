@@ -519,7 +519,103 @@
 }
 
 .rw-copy-btn {
-    margin-top: 2px;
+    margin-top: 8px;
+}
+
+/* ── Translator: confidence + rhyme ─────────────────────────────────────────── */
+
+.rw-trans-conf-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 10px;
+    font-size: 0.85em;
+}
+
+.rw-trans-conf-detail {
+    color: var(--text-muted);
+}
+
+.rw-trans-lines {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+.rw-trans-blank {
+    height: 0.6em;
+}
+
+.rw-rhyme-section {
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 6px;
+    font-size: 0.85em;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.rw-rhyme-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.rw-rhyme-label {
+    color: var(--text-muted);
+    font-size: 0.9em;
+}
+
+.rw-rhyme-scheme {
+    font-family: var(--font-monospace);
+    font-size: 0.95em;
+    letter-spacing: 0.05em;
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.rw-rhyme-letter {
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-weight: 600;
+}
+
+.rw-rhyme-ok      { color: var(--color-green, #4caf50); background: color-mix(in srgb, var(--color-green, #4caf50) 12%, transparent); }
+.rw-rhyme-break   { color: var(--text-error, #e05252);  background: color-mix(in srgb, var(--text-error, #e05252) 12%, transparent); }
+.rw-rhyme-unknown { color: var(--text-muted); }
+
+.rw-rhyme-fix-row {
+    font-size: 0.9em;
+    color: var(--text-muted);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+}
+
+.rw-rhyme-fix-label {
+    color: var(--text-error, #e05252);
+}
+
+.rw-rhyme-alt {
+    font-family: var(--font-monospace);
+    font-size: 0.95em;
+    color: var(--text-accent);
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
+    cursor: pointer;
+}
+
+.rw-rhyme-alt-exact {
+    font-weight: 700;
+    background: color-mix(in srgb, var(--interactive-accent) 18%, transparent);
 }
 
 /* ── Export ─────────────────────────────────────────────────────────────────── */
