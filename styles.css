@@ -522,6 +522,21 @@
     margin-top: 8px;
 }
 
+.rw-tts-btn {
+    font-size: 0.9em;
+    padding: 1px 6px;
+    line-height: 1.4;
+    opacity: 0.7;
+}
+.rw-tts-btn:hover { opacity: 1; }
+
+.rw-trans-btn-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+    align-items: center;
+}
+
 /* ── Translator: confidence + rhyme ─────────────────────────────────────────── */
 
 .rw-trans-conf-row {

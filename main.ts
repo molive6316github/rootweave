@@ -356,6 +356,22 @@ function importWords(template: string, text: string): Word[] {
         });
 }
 
+// ── TTS helpers ───────────────────────────────────────────────────────────────
+
+function ttsSpeak(text: string, btn: HTMLButtonElement, rate = 1.0) {
+    if (window.speechSynthesis.speaking) {
+        window.speechSynthesis.cancel();
+        btn.setText('🔊');
+        return;
+    }
+    const utt  = new SpeechSynthesisUtterance(text);
+    utt.rate   = rate;
+    utt.onend  = () => btn.setText('🔊');
+    utt.onerror = () => btn.setText('🔊');
+    btn.setText('⏹');
+    window.speechSynthesis.speak(utt);
+}
+
 // Replace accented / special characters with plain ASCII equivalents
 function stripDiacritics(str: string): string {
     // Manual mappings for characters that don't decompose via NFD
@@ -1701,8 +1717,9 @@ class RootweaveView extends ItemView {
                 }
             }
 
-            // ── Copy ─────────────────────────────────────────────────────────
-            outputEl.createEl('button', { cls: 'rw-btn rw-btn-sm rw-copy-btn', text: 'Copy' })
+            // ── Copy + TTS ────────────────────────────────────────────────────
+            const btnRow = outputEl.createEl('div', { cls: 'rw-trans-btn-row' });
+            btnRow.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Copy' })
                 .addEventListener('click', () => {
                     const text = lineResults
                         .map(r => r.map(({ prefix, word, suffix, translated }) =>
@@ -1711,6 +1728,33 @@ class RootweaveView extends ItemView {
                     void navigator.clipboard.writeText(text);
                     new Notice('Copied!');
                 });
+
+            const transSpeak = () => {
+                const allPh    = [...this.phon.vowels, ...this.phon.consonants];
+                const vowelSet = new Set(this.phon.vowels.map(v => v.symbol));
+                const hasPhon  = allPh.length > 0;
+
+                return lineResults
+                    .map(results => results
+                        .filter(t => t.word.length > 0)
+                        .map(({ word, translated }) => {
+                            if (!translated) return word;
+                            if (direction === 'reverse') return translated;
+                            // Forward: speak the pron reading so TTS approximates the conlang
+                            if (!hasPhon) return translated;
+                            const toks  = phonTokenize(translated.toLowerCase(), allPh);
+                            const sylls = phonSyllabify(toks, vowelSet);
+                            if (!sylls.length) return translated;
+                            const si  = this.plugin.wordStress[translated.toLowerCase()] ?? 0;
+                            return phonPronReading(sylls, si, this.phon) || translated;
+                        })
+                        .join(' '))
+                    .filter(l => l.trim())
+                    .join('. ');
+            };
+
+            const speakBtn = btnRow.createEl('button', { cls: 'rw-btn rw-btn-sm rw-tts-btn', text: '🔊' });
+            speakBtn.addEventListener('click', () => ttsSpeak(transSpeak(), speakBtn));
         };
 
         translateBtn.addEventListener('click', doTranslate);
@@ -1947,6 +1991,8 @@ class RootweaveView extends ItemView {
                 const pronRow = tryResult.createEl('div', { cls: 'rw-phon-pron-row' });
                 renderSyllableDisplay(pronRow, syllTokens, activeStress);
                 pronRow.createEl('span', { cls: 'rw-phon-reading', text: reading });
+                const ttsBtn = pronRow.createEl('button', { cls: 'rw-btn rw-btn-sm rw-tts-btn', text: '🔊' });
+                ttsBtn.addEventListener('click', () => ttsSpeak(reading, ttsBtn));
 
                 if (isOverride) {
                     pronRow.createEl('span', { cls: 'rw-conf rw-conf-high', text: '✓ corrected' });
