@@ -618,6 +618,64 @@
     background: color-mix(in srgb, var(--interactive-accent) 18%, transparent);
 }
 
+/* ── Quick-add panel ─────────────────────────────────────────────────────────── */
+
+.rw-word-addable {
+    cursor: pointer;
+    border-bottom: 1px dashed var(--text-error, #e05252);
+}
+.rw-word-addable:hover {
+    background: color-mix(in srgb, var(--text-error, #e05252) 10%, transparent);
+    border-radius: 2px;
+}
+
+.rw-gloss-missing {
+    cursor: pointer;
+}
+
+.rw-quick-add-panel {
+    margin-top: 8px;
+}
+
+.rw-qa-inner {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 10px 12px;
+    background: var(--background-secondary);
+    border: 1px solid var(--interactive-accent);
+    border-radius: 6px;
+    font-size: 0.9em;
+}
+
+.rw-qa-label {
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.rw-qa-input {
+    width: 140px;
+    font-family: var(--font-monospace);
+}
+
+.rw-qa-pos {
+    font-size: 0.85em;
+    padding: 2px 4px;
+    border-radius: 4px;
+    border: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+    color: var(--text-normal);
+}
+
+.rw-qa-hint {
+    font-size: 0.8em;
+    color: var(--text-muted);
+    font-style: italic;
+    flex-basis: 100%;
+    padding-top: 2px;
+}
+
 /* ── Export ─────────────────────────────────────────────────────────────────── */
 
 .rw-file-links {

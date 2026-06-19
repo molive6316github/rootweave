@@ -371,6 +371,69 @@ function stripDiacritics(str: string): string {
     return s.normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
+// NN-assisted suggestion for a missing conlang word.
+// Priority: exact root match → partial root match → phonotactic generation.
+function suggestConlangWord(
+    englishWord: string,
+    roots: Root[],
+    phon: PhonologyData,
+    model: PhonModel | null,
+): { form: string; hint: string } {
+    const el = englishWord.toLowerCase();
+    const meaningsOf = (m: string) => m.toLowerCase().split(/[\s,;/]+/).map(p => p.trim()).filter(Boolean);
+
+    // 1. Exact root meaning / alternate match
+    const exactRoot = roots.find(r =>
+        meaningsOf(r.meaning).some(p => p === el) ||
+        r.alternates.map(a => a.toLowerCase()).indexOf(el) !== -1
+    );
+    if (exactRoot) return { form: exactRoot.root, hint: `root "${exactRoot.root}" (${exactRoot.meaning})` };
+
+    // 2. Partial root meaning overlap
+    const partialRoot = roots.find(r =>
+        meaningsOf(r.meaning).some(p => p.length > 2 && (el.includes(p) || p.includes(el)))
+    );
+    if (partialRoot) return { form: partialRoot.root, hint: `related root "${partialRoot.root}" (${partialRoot.meaning})` };
+
+    // 3. Phonotactically generated word using the inventory (and embedding similarity if model exists)
+    const vowels = phon.vowels.map(v => v.symbol);
+    const cons   = phon.consonants.map(c => c.symbol);
+    if (vowels.length === 0) return { form: '', hint: '' };
+
+    // Weight consonants by embedding similarity to the English word's first letter when possible
+    let pick = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
+    if (model && cons.length > 1) {
+        const firstLetter = el[0] ?? '';
+        const scored = cons.map(c => ({
+            c,
+            sim: model.E[c] && model.E[firstLetter]
+                ? model.E[c].reduce((s, v, i) => s + v * (model.E[firstLetter][i] ?? 0), 0)
+                : 0,
+        })).sort((a, b) => b.sim - a.sim);
+        pick = (arr: string[]) => {
+            const top = scored.filter(x => arr.indexOf(x.c) !== -1).slice(0, 3);
+            return top.length ? top[Math.floor(Math.random() * top.length)].c : arr[0];
+        };
+    }
+
+    const sylCount = el.length <= 4 ? 1 : el.length <= 7 ? 2 : 3;
+    let generated  = '';
+    for (let s = 0; s < sylCount; s++) {
+        if (cons.length > 0) generated += pick(cons);
+        generated += vowels[Math.floor(Math.random() * vowels.length)];
+        if (s < sylCount - 1 && cons.length > 0) generated += pick(cons);
+    }
+    // Retry once if a banned cluster appears
+    if (phon.banned.some(b => b && generated.includes(b))) {
+        generated = vowels[Math.floor(Math.random() * vowels.length)];
+        for (let s = 0; s < sylCount - 1; s++) {
+            if (cons.length > 0) generated += pick(cons);
+            generated += vowels[Math.floor(Math.random() * vowels.length)];
+        }
+    }
+    return { form: generated, hint: 'phonotactic suggestion' };
+}
+
 // Mirror capitalisation of source onto target: "Hello" → Title, "HELLO" → UPPER
 function matchCase(source: string, target: string): string {
     if (!source || !target) return target;
@@ -1404,9 +1467,47 @@ class RootweaveView extends ItemView {
         glossLabel.appendText(' Show interlinear gloss');
         const translateBtn = el.createEl('button', { cls: 'rw-btn rw-btn-primary', text: 'Translate' });
         const outputEl     = el.createEl('div', { cls: 'rw-translator-output' });
+        const quickAddEl   = el.createEl('div', { cls: 'rw-quick-add-panel' });
 
-        translateBtn.addEventListener('click', () => {
+        // Shared quick-add form — shown below output when a missing word is clicked
+        const showQuickAdd = (englishWord: string, doTranslate: () => void) => {
+            quickAddEl.empty();
+            const { form: suggested, hint } = suggestConlangWord(
+                englishWord, this.roots, this.phon, this.plugin.phonModel
+            );
+            const panel  = quickAddEl.createEl('div', { cls: 'rw-qa-inner' });
+            panel.createEl('span', { cls: 'rw-qa-label', text: `Add "${englishWord}" →` });
+            const formIn = panel.createEl('input', {
+                cls: 'rw-input rw-qa-input',
+                attr: { type: 'text', value: suggested, placeholder: 'conlang word' },
+            });
+            const posSel = panel.createEl('select', { cls: 'rw-qa-pos' });
+            ['noun','verb','adj','adv','other'].forEach(p =>
+                posSel.createEl('option', { value: p, text: p })
+            );
+            if (hint) panel.createEl('span', { cls: 'rw-qa-hint', text: `💡 ${hint}` });
+
+            const saveBtn = panel.createEl('button', { cls: 'rw-btn rw-btn-sm rw-btn-primary', text: 'Save' });
+            const skipBtn = panel.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Skip' });
+            skipBtn.addEventListener('click', () => quickAddEl.empty());
+            saveBtn.addEventListener('click', () => {
+                const wordForm = formIn.value.trim();
+                if (!wordForm) { new Notice('Enter a conlang form first.'); return; }
+                const newWord: Word = { word: wordForm, meaning: englishWord, pos: posSel.value, roots: [] };
+                this.words.push(newWord);
+                void this.plugin.saveWords(this.words).then(() => {
+                    new Notice(`Saved "${wordForm}" → ${englishWord}`);
+                    quickAddEl.empty();
+                    doTranslate();
+                });
+            });
+            formIn.focus();
+            formIn.select();
+        };
+
+        const doTranslate = () => {
             outputEl.empty();
+            quickAddEl.empty();
             const fullInput = inputArea.value.trim();
             if (!fullInput) return;
 
@@ -1472,8 +1573,11 @@ class RootweaveView extends ItemView {
                             trans.setText(translated); trans.addClass('rw-gloss-found');
                             orig.title = `→ ${translated}`;
                         } else {
-                            trans.setText('?'); trans.addClass('rw-gloss-missing');
+                            trans.setText(direction === 'forward' ? '+ add' : '?');
+                            trans.addClass('rw-gloss-missing');
                             orig.addClass('rw-unknown-word'); orig.title = 'Not in dictionary';
+                            if (direction === 'forward')
+                                trans.addEventListener('click', () => showQuickAdd(word, doTranslate));
                         }
                     });
                 } else {
@@ -1484,6 +1588,10 @@ class RootweaveView extends ItemView {
                         if (translated) {
                             const s = lineEl.createEl('span', { cls: 'rw-word-found', text: translated });
                             s.title = `${word} → ${meaning}`;
+                        } else if (direction === 'forward') {
+                            const s = lineEl.createEl('span', { cls: 'rw-word-missing rw-word-addable', text: word });
+                            s.title = 'Click to add to dictionary';
+                            s.addEventListener('click', () => showQuickAdd(word, doTranslate));
                         } else {
                             const s = lineEl.createEl('span', { cls: 'rw-word-missing', text: word });
                             s.title = 'Not in dictionary';
@@ -1603,7 +1711,9 @@ class RootweaveView extends ItemView {
                     void navigator.clipboard.writeText(text);
                     new Notice('Copied!');
                 });
-        });
+        };
+
+        translateBtn.addEventListener('click', doTranslate);
     }
 
     // ── Export tab ────────────────────────────────────────────────────────────
