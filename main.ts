@@ -1739,14 +1739,18 @@ class RootweaveView extends ItemView {
                         .filter(t => t.word.length > 0)
                         .map(({ word, translated }) => {
                             if (!translated) return word;
-                            if (direction === 'reverse') return translated;
-                            // Forward: speak the pron reading so TTS approximates the conlang
+                            if (direction === 'reverse') {
+                                // "happy/glad" → "happy, glad" so TTS doesn't say "slash"
+                                return translated.split(/[/|]+/).map(p => p.trim()).filter(Boolean).join(', ');
+                            }
+                            // Forward: always route through the pronunciation engine
                             if (!hasPhon) return translated;
                             const toks  = phonTokenize(translated.toLowerCase(), allPh);
                             const sylls = phonSyllabify(toks, vowelSet);
                             if (!sylls.length) return translated;
-                            const si  = this.plugin.wordStress[translated.toLowerCase()] ?? 0;
-                            return phonPronReading(sylls, si, this.phon) || translated;
+                            const si      = this.plugin.wordStress[translated.toLowerCase()] ?? 0;
+                            const reading = phonPronReading(sylls, si, this.phon);
+                            return reading || translated;
                         })
                         .join(' '))
                     .filter(l => l.trim())
