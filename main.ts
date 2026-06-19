@@ -1365,8 +1365,24 @@ class RootweaveView extends ItemView {
     // ── Translator tab ────────────────────────────────────────────────────────
 
     private renderTranslator(el: HTMLElement) {
-        el.createEl('p', { cls: 'rw-subtitle', text: 'Translate English → your conlang using the dictionary.' });
-        const inputArea    = el.createEl('textarea', { cls: 'rw-textarea', attr: { placeholder: 'Type an English sentence or poem…' } });
+        el.createEl('p', { cls: 'rw-subtitle', text: 'Translate using your dictionary and roots.' });
+
+        // ── Direction toggle ──────────────────────────────────────────────────
+        let direction: 'forward' | 'reverse' = 'forward';
+        const dirRow  = el.createEl('div', { cls: 'rw-mode-row' });
+        const btnFwd  = dirRow.createEl('button', { cls: 'rw-mode-btn is-active', text: 'English → Conlang' });
+        const btnRev  = dirRow.createEl('button', { cls: 'rw-mode-btn',           text: 'Conlang → English' });
+        const setDir  = (d: 'forward' | 'reverse') => {
+            direction = d;
+            btnFwd.toggleClass('is-active', d === 'forward');
+            btnRev.toggleClass('is-active', d === 'reverse');
+            inputArea.setAttribute('placeholder',
+                d === 'forward' ? 'Type English text or a poem…' : 'Type conlang text…');
+        };
+        btnFwd.addEventListener('click', () => setDir('forward'));
+        btnRev.addEventListener('click', () => setDir('reverse'));
+
+        const inputArea    = el.createEl('textarea', { cls: 'rw-textarea', attr: { placeholder: 'Type English text or a poem…' } });
         const glossLabel   = el.createEl('label', { cls: 'rw-toggle-label' });
         const glossChk     = glossLabel.createEl('input');
         glossChk.type      = 'checkbox';
@@ -1379,38 +1395,52 @@ class RootweaveView extends ItemView {
             const fullInput = inputArea.value.trim();
             if (!fullInput) return;
 
-            // Split into lines — each line is one verse line / sentence
-            const inputLines = fullInput.split(/\r?\n/);
+            // Unified dictionary: words + roots, both directions
+            type DictEntry = { conlang: string; meaning: string };
+            const dict: DictEntry[] = [
+                ...this.words.map(w => ({ conlang: w.word, meaning: w.meaning })),
+                ...this.roots.map(r => ({ conlang: r.root, meaning: r.meaning })),
+            ];
 
-            type TokenResult = { prefix: string; word: string; suffix: string; entry: Word | undefined; translated: string | null };
-
-            const translateToken = (token: string): TokenResult => {
-                const m      = token.match(/^([^a-zA-Z]*)([a-zA-Z]*)([^a-zA-Z]*)$/);
-                const prefix = m?.[1] ?? '';
-                const word   = m?.[2] ?? token;
-                const suffix = m?.[3] ?? '';
-                const entry  = this.words.find(w =>
-                    w.meaning.toLowerCase().split(/[\s,;/]+/).some(p => p.trim() === word.toLowerCase())
-                );
-                return { prefix, word, suffix, entry, translated: entry ? matchCase(word, entry.word) : null };
+            // Strip leading/trailing punctuation from a token, keep the word core
+            const splitToken = (token: string) => {
+                const m = token.match(/^([^a-zA-ZÀ-ɏ]*)(.+?)([^a-zA-ZÀ-ɏ]*)$/);
+                return m ? { prefix: m[1], word: m[2], suffix: m[3] } : { prefix: '', word: token, suffix: '' };
             };
 
-            // Translate all lines
+            type TokenResult = { prefix: string; word: string; suffix: string; meaning: string; translated: string | null };
+
+            const translateToken = (token: string): TokenResult => {
+                const { prefix, word, suffix } = splitToken(token);
+                if (direction === 'forward') {
+                    const wl    = word.toLowerCase();
+                    const entry = dict.find(d =>
+                        d.meaning.toLowerCase().split(/[\s,;/]+/).map(p => p.trim()).some(p => p === wl)
+                    );
+                    return { prefix, word, suffix, meaning: entry?.meaning ?? '', translated: entry ? matchCase(word, entry.conlang) : null };
+                } else {
+                    const wl    = word.toLowerCase();
+                    const entry = dict.find(d => d.conlang.toLowerCase() === wl);
+                    return { prefix, word, suffix, meaning: entry?.meaning ?? '', translated: entry ? entry.meaning : null };
+                }
+            };
+
+            const inputLines  = fullInput.split(/\r?\n/);
             const lineResults: TokenResult[][] = inputLines.map(line =>
                 line.trim() === '' ? [] : line.split(/\s+/).map(translateToken)
             );
 
             // ── Confidence score ──────────────────────────────────────────────
-            const allTokens    = ([] as TokenResult[]).concat(...lineResults);
-            const realWords    = allTokens.filter((t: TokenResult) => t.word.length > 0);
-            const foundWords   = realWords.filter((t: TokenResult) => t.translated !== null);
-            const pct          = realWords.length ? Math.round(foundWords.length / realWords.length * 100) : 100;
-            const confCls      = pct >= 85 ? 'rw-conf-high' : pct >= 60 ? 'rw-conf-mid' : 'rw-conf-low';
-            const confRow      = outputEl.createEl('div', { cls: 'rw-trans-conf-row' });
+            const allTokens  = ([] as TokenResult[]).concat(...lineResults);
+            const realWords  = allTokens.filter((t: TokenResult) => t.word.length > 0);
+            const foundWords = realWords.filter((t: TokenResult) => t.translated !== null);
+            const pct        = realWords.length ? Math.round(foundWords.length / realWords.length * 100) : 100;
+            const confCls    = pct >= 85 ? 'rw-conf-high' : pct >= 60 ? 'rw-conf-mid' : 'rw-conf-low';
+            const confRow    = outputEl.createEl('div', { cls: 'rw-trans-conf-row' });
             confRow.createEl('span', { cls: `rw-conf ${confCls}`, text: `${pct}% coverage` });
             confRow.createEl('span', { cls: 'rw-trans-conf-detail', text: ` — ${foundWords.length} of ${realWords.length} words found` });
 
-            // ── Render translated lines ───────────────────────────────────────
+            // ── Render lines ──────────────────────────────────────────────────
             const linesWrap = outputEl.createEl('div', { cls: 'rw-trans-lines' });
 
             lineResults.forEach((results, li) => {
@@ -1433,12 +1463,12 @@ class RootweaveView extends ItemView {
                     });
                 } else {
                     const lineEl = linesWrap.createEl('div', { cls: 'rw-translation-line', attr: { 'data-line': String(li) } });
-                    results.forEach(({ prefix, word, suffix, entry, translated }, i) => {
+                    results.forEach(({ prefix, word, suffix, meaning, translated }, i) => {
                         if (i > 0) lineEl.appendText(' ');
                         if (prefix) lineEl.appendText(prefix);
                         if (translated) {
                             const s = lineEl.createEl('span', { cls: 'rw-word-found', text: translated });
-                            s.title = `${word} → ${entry?.meaning ?? ''}`;
+                            s.title = `${word} → ${meaning}`;
                         } else {
                             const s = lineEl.createEl('span', { cls: 'rw-word-missing', text: word });
                             s.title = 'Not in dictionary';
@@ -1448,44 +1478,38 @@ class RootweaveView extends ItemView {
                 }
             });
 
-            // ── Rhyme analysis (multi-line only) ─────────────────────────────
+            // ── Rhyme analysis (forward, multi-line only) ─────────────────────
             const nonEmptyLines = lineResults.filter(l => l.length > 0);
-            if (nonEmptyLines.length >= 2) {
-                // English rhyme keys (last word of each source line)
-                const srcLastWords = nonEmptyLines.map((_, li) => {
-                    const srcLine = inputLines.filter(l => l.trim() !== '')[li] ?? '';
-                    const words   = srcLine.trim().split(/\s+/);
-                    const last    = words[words.length - 1] ?? '';
-                    return last.replace(/[^a-zA-Z]/g, '');
+            if (direction === 'forward' && nonEmptyLines.length >= 2) {
+                const nonEmptySrcLines = inputLines.filter(l => l.trim() !== '');
+                const srcLastWords     = nonEmptyLines.map((_, li) => {
+                    const toks = (nonEmptySrcLines[li] ?? '').trim().split(/\s+/);
+                    return (toks[toks.length - 1] ?? '').replace(/[^a-zA-Z]/g, '');
                 });
                 const srcRhymeKeys = srcLastWords.map(w => englishRhymeKey(w));
                 const srcScheme    = detectRhymeScheme(srcRhymeKeys);
                 const hasRhyme     = new Set(srcScheme).size < srcScheme.length;
 
                 if (hasRhyme) {
-                    const phon     = this.phon;
+                    const phon      = this.phon;
                     const stressMap = this.plugin.wordStress;
-                    const model    = this.plugin.phonModel;
-                    const hasPhon  = phon.vowels.length > 0 || phon.consonants.length > 0;
+                    const model     = this.plugin.phonModel;
+                    const hasPhon   = phon.vowels.length > 0 || phon.consonants.length > 0;
 
-                    // Conlang rhyme keys — last translated word of each non-empty line
                     const transLastWords = nonEmptyLines.map(results => {
-                        for (let i = results.length - 1; i >= 0; i--) {
+                        for (let i = results.length - 1; i >= 0; i--)
                             if (results[i].translated) return results[i].translated!;
-                        }
                         return null;
                     });
-
                     const transRhymeData = transLastWords.map(w =>
                         w && hasPhon ? conlangRhymeKey(w, phon, stressMap) : null
                     );
-                    const transKeys    = transRhymeData.map(d => d?.key ?? '');
-                    const transScheme  = detectRhymeScheme(transKeys.map(k => k || `__${Math.random()}`));
+                    const transScheme = detectRhymeScheme(
+                        transRhymeData.map(d => d?.key || `__${Math.random()}`)
+                    );
 
-                    // Build analysis section
                     const rhymeSection = outputEl.createEl('div', { cls: 'rw-rhyme-section' });
                     rhymeSection.createEl('div', { cls: 'rw-label', text: 'Rhyme analysis' });
-
                     const schemeRow = rhymeSection.createEl('div', { cls: 'rw-rhyme-row' });
                     schemeRow.createEl('span', { cls: 'rw-rhyme-label', text: 'Source:' });
                     schemeRow.createEl('span', { cls: 'rw-rhyme-scheme', text: srcScheme.join(' ') });
@@ -1494,17 +1518,15 @@ class RootweaveView extends ItemView {
                     if (!hasPhon) {
                         schemeRow.createEl('span', { cls: 'rw-conf rw-conf-low', text: 'set up phonology to check' });
                     } else {
-                        // Mark each line: ✓ if translation rhyme letter matches source rhyme letter, ✗ if not
                         const lineMatches = srcScheme.map((srcLetter, i) => {
                             if (!transRhymeData[i]) return null;
-                            // Find which source lines share this rhyme letter
                             const sibling = srcScheme.findIndex((l, j) => l === srcLetter && j !== i);
-                            if (sibling < 0) return true; // unique rhyme group — can't evaluate
+                            if (sibling < 0) return true;
                             return transScheme[i] === transScheme[sibling];
                         });
 
                         const schemeSpan = schemeRow.createEl('span', { cls: 'rw-rhyme-scheme' });
-                        srcScheme.forEach((_letter, i) => {
+                        srcScheme.forEach((_l, i) => {
                             const match = lineMatches[i];
                             const cls   = match === false ? 'rw-rhyme-letter rw-rhyme-break'
                                         : match === true  ? 'rw-rhyme-letter rw-rhyme-ok'
@@ -1513,60 +1535,54 @@ class RootweaveView extends ItemView {
                             if (i < srcScheme.length - 1) schemeSpan.appendText(' ');
                         });
 
-                        // For each broken rhyme line, suggest alternatives
                         lineMatches.forEach((match, i) => {
                             if (match !== false) return;
                             const srcLetter  = srcScheme[i];
-                            // Find a sibling line that DOES rhyme (to get the target rhyme key)
                             const siblingIdx = lineMatches.findIndex((m, j) => m === true && srcScheme[j] === srcLetter);
                             const targetData = siblingIdx >= 0 ? transRhymeData[siblingIdx] : null;
                             const engWord    = srcLastWords[i];
                             const brokenWord = transLastWords[i] ?? '';
 
-                            // Find all dictionary entries that match the English word's meaning
-                            const candidates = this.words
-                                .filter(w => w.meaning.toLowerCase().split(/[\s,;/]+/).some(p => p.trim() === engWord.toLowerCase()))
-                                .filter(w => w.word.toLowerCase() !== brokenWord.toLowerCase())
-                                .map(w => {
-                                    const rk    = conlangRhymeKey(w.word, phon, stressMap);
+                            const candidates = dict
+                                .filter(d => d.meaning.toLowerCase().split(/[\s,;/]+/).map(p => p.trim()).some(p => p === engWord.toLowerCase()))
+                                .filter(d => d.conlang.toLowerCase() !== brokenWord.toLowerCase())
+                                .map(d => {
+                                    const rk    = conlangRhymeKey(d.conlang, phon, stressMap);
                                     const exact = rk && targetData ? rk.key === targetData.key : false;
                                     const sim   = rk && targetData && model
-                                        ? rhymeSimilarity(rk.tokens, targetData.tokens, model)
-                                        : 0;
-                                    return { word: w.word, exact, sim };
+                                        ? rhymeSimilarity(rk.tokens, targetData.tokens, model) : 0;
+                                    return { word: d.conlang, exact, sim };
                                 })
                                 .sort((a, b) => (b.exact ? 1 : b.sim) - (a.exact ? 1 : a.sim))
                                 .slice(0, 3);
 
-                            if (candidates.length > 0 || brokenWord) {
-                                const fixRow = rhymeSection.createEl('div', { cls: 'rw-rhyme-fix-row' });
-                                const endStr = brokenWord ? ` "${brokenWord}"` : '';
-                                fixRow.createEl('span', { cls: 'rw-rhyme-fix-label',
-                                    text: `Line ${i + 1}${endStr} breaks rhyme (${srcLetter})` });
-                                if (candidates.length > 0) {
-                                    fixRow.appendText(' — try: ');
-                                    candidates.forEach((c, ci) => {
-                                        if (ci > 0) fixRow.appendText(', ');
-                                        const badge = c.exact ? '✓' : `${Math.round(c.sim * 100)}%`;
-                                        fixRow.createEl('span', {
-                                            cls: 'rw-rhyme-alt' + (c.exact ? ' rw-rhyme-alt-exact' : ''),
-                                            text: `${c.word} (${badge})`,
-                                        });
+                            const fixRow = rhymeSection.createEl('div', { cls: 'rw-rhyme-fix-row' });
+                            const endStr = brokenWord ? ` "${brokenWord}"` : '';
+                            fixRow.createEl('span', { cls: 'rw-rhyme-fix-label',
+                                text: `Line ${i + 1}${endStr} breaks rhyme (${srcLetter})` });
+                            if (candidates.length > 0) {
+                                fixRow.appendText(' — try: ');
+                                candidates.forEach((c, ci) => {
+                                    if (ci > 0) fixRow.appendText(', ');
+                                    const badge = c.exact ? '✓' : `${Math.round(c.sim * 100)}%`;
+                                    fixRow.createEl('span', {
+                                        cls: 'rw-rhyme-alt' + (c.exact ? ' rw-rhyme-alt-exact' : ''),
+                                        text: `${c.word} (${badge})`,
                                     });
-                                } else {
-                                    fixRow.appendText(' — no alternatives in dictionary');
-                                }
+                                });
+                            } else {
+                                fixRow.appendText(' — no alternatives in dictionary');
                             }
                         });
                     }
                 }
             }
 
-            // ── Copy button ───────────────────────────────────────────────────
+            // ── Copy ─────────────────────────────────────────────────────────
             outputEl.createEl('button', { cls: 'rw-btn rw-btn-sm rw-copy-btn', text: 'Copy' })
                 .addEventListener('click', () => {
                     const text = lineResults
-                        .map(results => results.map(({ prefix, word, suffix, translated }) =>
+                        .map(r => r.map(({ prefix, word, suffix, translated }) =>
                             prefix + (translated ?? word) + suffix).join(' '))
                         .join('\n');
                     void navigator.clipboard.writeText(text);
