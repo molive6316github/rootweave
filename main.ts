@@ -783,6 +783,7 @@ export default class RootweavePlugin extends Plugin {
     settings: Settings;
     phonModel:    PhonModel | null = null;
     phonExamples: PronEx[]        = [];
+    wordStress:   Record<string, number> = {};
 
     async onload() {
         await this.loadSettings();
@@ -861,6 +862,15 @@ export default class RootweavePlugin extends Plugin {
         const data = (await this.loadData() as Record<string, unknown>) ?? {};
         this.settings     = { language: (data['language'] as string) ?? DEFAULT_SETTINGS.language };
         this.phonExamples = (data['phonExamples'] as PronEx[] | undefined) ?? [];
+        // wordStress is the authoritative word→stress override table.
+        // Migrate from phonExamples if wordStress hasn't been saved yet.
+        const savedWS = data['wordStress'] as Record<string, number> | undefined;
+        if (savedWS) {
+            this.wordStress = savedWS;
+        } else {
+            this.wordStress = {};
+            for (const ex of this.phonExamples) this.wordStress[ex.word] = ex.stress;
+        }
         const saved = (data['phonModel'] as PhonModel | null | undefined) ?? null;
         // Discard models from older architectures — examples are kept and will retrain
         this.phonModel = (saved && saved.version === MODEL_VER) ? saved : null;
@@ -871,6 +881,7 @@ export default class RootweavePlugin extends Plugin {
             language:     this.settings.language,
             phonModel:    this.phonModel,
             phonExamples: this.phonExamples,
+            wordStress:   this.wordStress,
         });
     }
 }
@@ -1555,36 +1566,37 @@ class RootweaveView extends ItemView {
                 this.plugin.phonModel = newPhonModel(allPh.map(p => p.symbol));
             const model = this.plugin.phonModel;
 
-            // Stored corrections always win over the NN — gives instant reliable feedback
-            const override = [...this.plugin.phonExamples].reverse().find(ex => ex.word === w);
+            // wordStress is the authoritative override table — O(1) lookup, no array scan
+            const storedStress: number | undefined = this.plugin.wordStress[w];
 
             // Shared correction handler
             const submitCorrection = (stressIdx: number) => {
+                // Update the simple override table immediately
+                this.plugin.wordStress[w] = stressIdx;
+                // Also keep phonExamples in sync for NN training
                 const ex: PronEx = { word: w, sylls: syllTokens, stress: stressIdx };
-                // Replace any previous correction for this exact word (no duplicates)
                 const prev = this.plugin.phonExamples.findIndex(e => e.word === w);
                 if (prev >= 0) this.plugin.phonExamples[prev] = ex;
                 else this.plugin.phonExamples.push(ex);
                 const m = this.plugin.phonModel ?? newPhonModel(allPh.map(p => p.symbol));
                 this.plugin.phonModel = m;
-                // Focused high-LR pass on this correction, then sweep all examples
                 for (let ep = 0; ep < 20; ep++) trainOnExample(ex, m, this.phon, 0.02);
                 if (this.plugin.phonExamples.length <= 40)
                     batchTrain(this.plugin.phonExamples, m, this.phon, 10);
                 void this.plugin.saveSettings();
                 new Notice('Correction saved!');
-                // Pass stressIdx directly so re-render never has to look it up
                 tryWord(stressIdx);
             };
 
-            // forcedStress bypasses all lookups — set by submitCorrection for instant display
+            // forcedStress (from submitCorrection) > wordStress override > NN prediction
             const activeStress = forcedStress !== undefined
                 ? forcedStress
-                : (override?.stress
-                    ?? (model && this.plugin.phonExamples.length >= 2
+                : (storedStress !== undefined
+                    ? storedStress
+                    : (model && this.plugin.phonExamples.length >= 2
                         ? predictStress(sylls, model).stressIdx
                         : null));
-            const isOverride = forcedStress !== undefined || !!override;
+            const isOverride = forcedStress !== undefined || storedStress !== undefined;
 
             if (activeStress !== null && sylls.length > 0) {
                 const pron    = phonReconstruct(syllTokens, activeStress);
@@ -1772,6 +1784,7 @@ class RootweaveView extends ItemView {
             clearBtn.addEventListener('click', () => {
                 this.plugin.phonExamples = [];
                 this.plugin.phonModel    = null;
+                this.plugin.wordStress   = {};
                 void this.plugin.saveSettings();
                 new Notice('Training data cleared.');
                 this.render();
