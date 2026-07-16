@@ -1,7 +1,7 @@
 {
   "name": "rootweave",
-  "version": "1.8.1",
-  "description": "Obsidian plugin for conlang worldbuilders",
+  "version": "1.8.2",
+  "description": "Plugin for conlang worldbuilders with tons of features.",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",

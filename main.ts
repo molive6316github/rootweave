@@ -946,18 +946,22 @@ export default class RootweavePlugin extends Plugin {
         this.addCommand({ id: 'open',       name: 'Open panel',      callback: () => { void this.openPanel(); } });
         this.addCommand({ id: 'open-graph', name: 'Open root graph', callback: () => { void this.openGraph(); } });
         this.addSettingTab(new RootweaveSettingTab(this.app, this));
+        // Open automatically on startup so it behaves like a native sidebar tab
+        this.app.workspace.onLayoutReady(() => { void this.openPanel(); });
     }
 
-    onunload() {}
+    onunload() {
+        this.app.workspace.detachLeavesOfType(VIEW_TYPE);
+    }
 
     async openPanel() {
         const { workspace } = this.app;
         let leaf = workspace.getLeavesOfType(VIEW_TYPE)[0];
         if (!leaf) {
-            const right = workspace.getRightLeaf(false);
-            if (right) { await right.setViewState({ type: VIEW_TYPE, active: true }); leaf = right; }
+            leaf = workspace.getLeftLeaf(false) ?? workspace.getLeaf(false);
+            await leaf.setViewState({ type: VIEW_TYPE, active: true });
         }
-        if (leaf) workspace.setActiveLeaf(leaf, { focus: true });
+        workspace.revealLeaf(leaf);
     }
 
     async openGraph() {
