@@ -18,6 +18,8 @@ import {
     Plugin,
     PluginSettingTab,
     Setting,
+    SettingDefinitionItem,
+    SettingDefinitionRender,
     TFile,
     WorkspaceLeaf,
     normalizePath,
@@ -508,8 +510,8 @@ function makeSyllables(syllTokens: string[][], phon: PhonologyData): Syllable[] 
 // Render syllables as styled spans — stressed syllable is bold and accent-colored
 function renderSyllableDisplay(parent: HTMLElement, syllTokens: string[][], stressIdx: number) {
     syllTokens.forEach((syll, si) => {
-        if (si > 0) parent.createEl('span', { cls: 'rw-phon-dot', text: '-' });
-        parent.createEl('span', {
+        if (si > 0) parent.createSpan({ cls: 'rw-phon-dot', text: '-' });
+        parent.createSpan({
             cls: 'rw-phon-syll-display' + (si === stressIdx ? ' is-stressed' : ''),
             text: syll.join(''),
         });
@@ -616,8 +618,7 @@ function syllFeats(syll: Syllable, idx: number, total: number, m: PhonModel): nu
     const avgEmb = Array.from({ length: E_DIM }, (_, j) =>
         embeds.reduce((s, e) => s + e[j], 0) / (embeds.length || 1)
     );
-    let onset = 0;
-    for (const _p of syll.phonemes) { if (!syll.isHeavy && onset === 0) break; onset++; }
+    const onset = syll.isHeavy ? syll.phonemes.length : 0;
     return [
         ...avgEmb,
         total > 1 ? idx / (total - 1) : 0,
@@ -946,22 +947,19 @@ export default class RootweavePlugin extends Plugin {
         this.addCommand({ id: 'open',       name: 'Open panel',      callback: () => { void this.openPanel(); } });
         this.addCommand({ id: 'open-graph', name: 'Open root graph', callback: () => { void this.openGraph(); } });
         this.addSettingTab(new RootweaveSettingTab(this.app, this));
-        // Open automatically on startup so it behaves like a native sidebar tab
+        // Open automatically on startup, as a normal main-area tab
         this.app.workspace.onLayoutReady(() => { void this.openPanel(); });
-    }
-
-    onunload() {
-        this.app.workspace.detachLeavesOfType(VIEW_TYPE);
     }
 
     async openPanel() {
         const { workspace } = this.app;
         let leaf = workspace.getLeavesOfType(VIEW_TYPE)[0];
         if (!leaf) {
-            leaf = workspace.getLeftLeaf(false) ?? workspace.getLeaf(false);
+            // 'tab' forces a normal main-area tab, never the sidebar
+            leaf = workspace.getLeaf('tab');
             await leaf.setViewState({ type: VIEW_TYPE, active: true });
         }
-        workspace.revealLeaf(leaf);
+        await workspace.revealLeaf(leaf);
     }
 
     async openGraph() {
@@ -969,10 +967,11 @@ export default class RootweavePlugin extends Plugin {
         // Re-use an existing graph leaf if one is already open
         let leaf = workspace.getLeavesOfType(VIEW_TYPE_GRAPH)[0];
         if (!leaf) {
-            leaf = workspace.getLeaf(false);
+            // 'tab' forces a normal main-area tab even when the active leaf is a sidebar
+            leaf = workspace.getLeaf('tab');
             await leaf.setViewState({ type: VIEW_TYPE_GRAPH, active: true });
         }
-        workspace.setActiveLeaf(leaf, { focus: true });
+        await workspace.revealLeaf(leaf);
     }
 
     // ── Vault I/O ─────────────────────────────────────────────────────────────
@@ -1101,10 +1100,10 @@ class RootweaveView extends ItemView {
         el.empty();
         el.addClass('rootweave-container');
 
-        el.createEl('div', { cls: 'rw-header' }).createEl('span', { cls: 'rw-title', text: 'Rootweave' });
+        el.createDiv({ cls: 'rw-header' }).createSpan({ cls: 'rw-title', text: 'Rootweave' });
 
-        const tabBar = el.createEl('div', { cls: 'rw-tab-bar' });
-        const body   = el.createEl('div', { cls: 'rw-content' });
+        const tabBar = el.createDiv({ cls: 'rw-tab-bar' });
+        const body   = el.createDiv({ cls: 'rw-content' });
 
         const TABS: { id: Tab; label: string }[] = [
             { id: 'roots',      label: `Roots (${this.roots.length})`   },
@@ -1138,7 +1137,7 @@ class RootweaveView extends ItemView {
     // ── Roots tab ─────────────────────────────────────────────────────────────
 
     private renderRoots(el: HTMLElement) {
-        const ctrl = el.createEl('div', { cls: 'rw-controls' });
+        const ctrl = el.createDiv({ cls: 'rw-controls' });
         const search = ctrl.createEl('input', { cls: 'rw-input', attr: { type: 'text', placeholder: 'Search…' } });
 
         const cats = ['All', ...new Set(this.roots.map(r => r.category).filter(Boolean))];
@@ -1156,7 +1155,7 @@ class RootweaveView extends ItemView {
                 }).open();
             });
 
-        const list = el.createEl('div', { cls: 'rw-list' });
+        const list = el.createDiv({ cls: 'rw-list' });
 
         const draw = () => {
             list.empty();
@@ -1170,16 +1169,16 @@ class RootweaveView extends ItemView {
             if (!visible.length) { list.createEl('p', { cls: 'rw-empty', text: 'No roots found.' }); return; }
 
             visible.forEach(root => {
-                const card = list.createEl('div', { cls: 'rw-card' });
-                const info = card.createEl('div', { cls: 'rw-card-info' });
-                info.createEl('span', { cls: 'rw-root-text', text: root.root });
+                const card = list.createDiv({ cls: 'rw-card' });
+                const info = card.createDiv({ cls: 'rw-card-info' });
+                info.createSpan({ cls: 'rw-root-text', text: root.root });
                 if (root.alternates.length)
-                    info.createEl('span', { cls: 'rw-root-alts', text: ` / ${root.alternates.join(' / ')}` });
-                info.createEl('span', { cls: 'rw-root-meaning', text: ` — ${root.meaning}` });
-                if (root.category) info.createEl('span', { cls: 'rw-badge', text: root.category });
-                if (root.notes)    card.createEl('div', { cls: 'rw-root-notes', text: root.notes });
+                    info.createSpan({ cls: 'rw-root-alts', text: ` / ${root.alternates.join(' / ')}` });
+                info.createSpan({ cls: 'rw-root-meaning', text: ` — ${root.meaning}` });
+                if (root.category) info.createSpan({ cls: 'rw-badge', text: root.category });
+                if (root.notes)    card.createDiv({ cls: 'rw-root-notes', text: root.notes });
 
-                const acts = card.createEl('div', { cls: 'rw-card-actions' });
+                const acts = card.createDiv({ cls: 'rw-card-actions' });
                 acts.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Edit' })
                     .addEventListener('click', () => {
                         new RootModal(this.app, root, updated => {
@@ -1206,10 +1205,10 @@ class RootweaveView extends ItemView {
     private renderBuilder(el: HTMLElement) {
         el.createEl('p', { cls: 'rw-subtitle', text: 'Type a word to see its root components and check grammar.' });
         const wordInput = el.createEl('input', { cls: 'rw-input rw-input-lg', attr: { type: 'text', placeholder: 'Type a word…' } });
-        const suggestEl = el.createEl('div', { cls: 'rw-suggestions' });
-        const phonEl    = el.createEl('div', { cls: 'rw-phon-breakdown' });
-        const formsEl   = el.createEl('div', { cls: 'rw-grammar-forms' });
-        const saveArea  = el.createEl('div', { cls: 'rw-add-word-area' });
+        const suggestEl = el.createDiv({ cls: 'rw-suggestions' });
+        const phonEl    = el.createDiv({ cls: 'rw-phon-breakdown' });
+        const formsEl   = el.createDiv({ cls: 'rw-grammar-forms' });
+        const saveArea  = el.createDiv({ cls: 'rw-add-word-area' });
 
         const analyze = () => {
             const word = wordInput.value.trim();
@@ -1223,12 +1222,12 @@ class RootweaveView extends ItemView {
             if (matched.length) {
                 suggestEl.createEl('p', { cls: 'rw-label', text: 'Root components:' });
                 matched.forEach(root => {
-                    const row = suggestEl.createEl('div', { cls: 'rw-suggestion-row' });
-                    row.createEl('span', { cls: 'rw-root-chip', text: root.root });
+                    const row = suggestEl.createDiv({ cls: 'rw-suggestion-row' });
+                    row.createSpan({ cls: 'rw-root-chip', text: root.root });
                     const alt = root.alternates.find(f => f.length > 0 && word.toLowerCase().includes(f.toLowerCase()));
-                    if (alt) row.createEl('span', { cls: 'rw-alt-chip', text: `via "${alt}"` });
-                    row.createEl('span', { text: ` → ${root.meaning}` });
-                    if (root.category) row.createEl('span', { cls: 'rw-badge rw-badge-sm', text: root.category });
+                    if (alt) row.createSpan({ cls: 'rw-alt-chip', text: `via "${alt}"` });
+                    row.createSpan({ text: ` → ${root.meaning}` });
+                    if (root.category) row.createSpan({ cls: 'rw-badge rw-badge-sm', text: root.category });
                 });
                 suggestEl.createEl('p', { cls: 'rw-meaning-hint', text: `Composed meaning: ${matched.map(r => r.meaning).join(' + ')}` });
             } else {
@@ -1247,12 +1246,12 @@ class RootweaveView extends ItemView {
 
                 if (tokens.length > 0) {
                     phonEl.createEl('p', { cls: 'rw-label', text: 'Phoneme breakdown:' });
-                    const breakRow = phonEl.createEl('div', { cls: 'rw-phon-break' });
+                    const breakRow = phonEl.createDiv({ cls: 'rw-phon-break' });
                     syllTokens.forEach((syll, si) => {
-                        if (si > 0) breakRow.createEl('span', { cls: 'rw-phon-dot', text: ' · ' });
+                        if (si > 0) breakRow.createSpan({ cls: 'rw-phon-dot', text: ' · ' });
                         syll.forEach(p => {
                             const ph = allPhonemes.find(x => x.symbol === p);
-                            const sp = breakRow.createEl('span', { cls: ph ? 'rw-phon-token' : 'rw-phon-unknown', text: p });
+                            const sp = breakRow.createSpan({ cls: ph ? 'rw-phon-token' : 'rw-phon-unknown', text: p });
                             if (ph) sp.title = ph.pron;
                         });
                     });
@@ -1263,14 +1262,14 @@ class RootweaveView extends ItemView {
                         const reading = phonPronReading(syllTokens, stressIdx, this.phon);
                         const confPct = Math.round(confidence * 100);
                         const confCls = confidence > 0.75 ? 'rw-conf-high' : confidence > 0.45 ? 'rw-conf-mid' : 'rw-conf-low';
-                        const pronRow = phonEl.createEl('div', { cls: 'rw-phon-pron-row' });
+                        const pronRow = phonEl.createDiv({ cls: 'rw-phon-pron-row' });
                         renderSyllableDisplay(pronRow, syllTokens, stressIdx);
-                        pronRow.createEl('span', { cls: 'rw-phon-reading', text: reading });
-                        pronRow.createEl('span', { cls: `rw-conf ${confCls}`, text: `${confPct}%` });
+                        pronRow.createSpan({ cls: 'rw-phon-reading', text: reading });
+                        pronRow.createSpan({ cls: `rw-conf ${confCls}`, text: `${confPct}%` });
 
                         if (sylls.length > 1) {
-                            const stressRow = phonEl.createEl('div', { cls: 'rw-phon-stress-row' });
-                            stressRow.createEl('span', { cls: 'rw-label', text: 'Stress: ' });
+                            const stressRow = phonEl.createDiv({ cls: 'rw-phon-stress-row' });
+                            stressRow.createSpan({ cls: 'rw-label', text: 'Stress: ' });
                             syllTokens.forEach((syll, si) => {
                                 const btn = stressRow.createEl('button', {
                                     cls: 'rw-btn rw-btn-sm rw-phon-syll' + (si === stressIdx ? ' is-stressed' : ''),
@@ -1306,14 +1305,14 @@ class RootweaveView extends ItemView {
                 formsEl.createEl('p', { cls: 'rw-label', text: 'Grammatical forms:' });
                 this.rules.forEach(rule => {
                     const result = applyRule(rule, word);
-                    const row = formsEl.createEl('div', { cls: 'rw-form-row' });
-                    row.createEl('span', { cls: `rw-badge rw-badge-${rule.type}`, text: rule.name });
+                    const row = formsEl.createDiv({ cls: 'rw-form-row' });
+                    row.createSpan({ cls: `rw-badge rw-badge-${rule.type}`, text: rule.name });
                     if (result) {
-                        row.createEl('span', { cls: 'rw-form-result', text: result });
-                        row.createEl('span', { cls: 'rw-form-meaning', text: `(${rule.meaning})` });
+                        row.createSpan({ cls: 'rw-form-result', text: result });
+                        row.createSpan({ cls: 'rw-form-meaning', text: `(${rule.meaning})` });
                     } else {
-                        row.createEl('span', { cls: 'rw-form-result', text: `${rule.form}  ${word}` });
-                        row.createEl('span', { cls: 'rw-form-meaning', text: `(${rule.meaning} — see Grammar tab)` });
+                        row.createSpan({ cls: 'rw-form-result', text: `${rule.form}  ${word}` });
+                        row.createSpan({ cls: 'rw-form-meaning', text: `(${rule.meaning} — see Grammar tab)` });
                     }
                 });
             }
@@ -1331,7 +1330,7 @@ class RootweaveView extends ItemView {
                 });
             } else {
             saveArea.createEl('p', { cls: 'rw-label', text: 'Save to dictionary:' });
-            const form      = saveArea.createEl('div', { cls: 'rw-add-word-form' });
+            const form      = saveArea.createDiv({ cls: 'rw-add-word-form' });
             const meaningIn = form.createEl('input', { cls: 'rw-input', attr: { type: 'text', placeholder: 'English meaning' } });
             const posIn     = form.createEl('input', { cls: 'rw-input', attr: { type: 'text', placeholder: 'Part of speech (noun, verb…)' } });
             form.createEl('button', { cls: 'rw-btn rw-btn-primary', text: 'Add to Dictionary' })
@@ -1354,7 +1353,7 @@ class RootweaveView extends ItemView {
     // ── Words tab ─────────────────────────────────────────────────────────────
 
     private renderWords(el: HTMLElement) {
-        const ctrl   = el.createEl('div', { cls: 'rw-controls' });
+        const ctrl   = el.createDiv({ cls: 'rw-controls' });
         const search = ctrl.createEl('input', { cls: 'rw-input', attr: { type: 'text', placeholder: 'Search words…' } });
         ctrl.createEl('button', { cls: 'rw-btn rw-btn-primary', text: '+ Word' })
             .addEventListener('click', () => {
@@ -1367,7 +1366,7 @@ class RootweaveView extends ItemView {
                 }).open();
             });
 
-        const list = el.createEl('div', { cls: 'rw-dict-list' });
+        const list = el.createDiv({ cls: 'rw-dict-list' });
 
         const draw = () => {
             list.empty();
@@ -1418,7 +1417,7 @@ class RootweaveView extends ItemView {
     private renderGrammar(el: HTMLElement) {
         el.createEl('p', { cls: 'rw-subtitle', text: 'Rules are tested against each word in the Builder.' });
 
-        const ctrl = el.createEl('div', { cls: 'rw-controls' });
+        const ctrl = el.createDiv({ cls: 'rw-controls' });
         ctrl.createEl('button', { cls: 'rw-btn rw-btn-primary', text: '+ Rule' })
             .addEventListener('click', () => {
                 new RuleModal(this.app, null, rule => {
@@ -1427,7 +1426,7 @@ class RootweaveView extends ItemView {
                 }).open();
             });
 
-        const list = el.createEl('div', { cls: 'rw-list' });
+        const list = el.createDiv({ cls: 'rw-list' });
 
         if (!this.rules.length) {
             list.createEl('p', { cls: 'rw-empty', text: 'No grammar rules yet. Add a suffix, prefix, or other construction.' });
@@ -1435,16 +1434,16 @@ class RootweaveView extends ItemView {
         }
 
         this.rules.forEach((rule, i) => {
-            const card = list.createEl('div', { cls: 'rw-card' });
-            const info = card.createEl('div', { cls: 'rw-card-info' });
-            info.createEl('span', { cls: 'rw-root-text', text: rule.name });
-            info.createEl('span', { cls: `rw-badge rw-badge-${rule.type}`, text: rule.type });
-            info.createEl('span', { cls: 'rw-root-chip', text: rule.form });
-            info.createEl('span', { cls: 'rw-root-meaning', text: ` — ${rule.meaning}` });
-            if (rule.example) card.createEl('div', { cls: 'rw-root-notes', text: `e.g. ${rule.example}` });
-            if (rule.notes)   card.createEl('div', { cls: 'rw-root-notes', text: rule.notes });
+            const card = list.createDiv({ cls: 'rw-card' });
+            const info = card.createDiv({ cls: 'rw-card-info' });
+            info.createSpan({ cls: 'rw-root-text', text: rule.name });
+            info.createSpan({ cls: `rw-badge rw-badge-${rule.type}`, text: rule.type });
+            info.createSpan({ cls: 'rw-root-chip', text: rule.form });
+            info.createSpan({ cls: 'rw-root-meaning', text: ` — ${rule.meaning}` });
+            if (rule.example) card.createDiv({ cls: 'rw-root-notes', text: `e.g. ${rule.example}` });
+            if (rule.notes)   card.createDiv({ cls: 'rw-root-notes', text: rule.notes });
 
-            const acts = card.createEl('div', { cls: 'rw-card-actions' });
+            const acts = card.createDiv({ cls: 'rw-card-actions' });
             acts.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Edit' })
                 .addEventListener('click', () => {
                     new RuleModal(this.app, rule, updated => {
@@ -1467,7 +1466,7 @@ class RootweaveView extends ItemView {
 
         // ── Direction toggle ──────────────────────────────────────────────────
         let direction: 'forward' | 'reverse' = 'forward';
-        const dirRow  = el.createEl('div', { cls: 'rw-mode-row' });
+        const dirRow  = el.createDiv({ cls: 'rw-mode-row' });
         const btnFwd  = dirRow.createEl('button', { cls: 'rw-mode-btn is-active', text: 'English → Conlang' });
         const btnRev  = dirRow.createEl('button', { cls: 'rw-mode-btn',           text: 'Conlang → English' });
         const setDir  = (d: 'forward' | 'reverse') => {
@@ -1486,8 +1485,8 @@ class RootweaveView extends ItemView {
         glossChk.type      = 'checkbox';
         glossLabel.appendText(' Show interlinear gloss');
         const translateBtn = el.createEl('button', { cls: 'rw-btn rw-btn-primary', text: 'Translate' });
-        const outputEl     = el.createEl('div', { cls: 'rw-translator-output' });
-        const quickAddEl   = el.createEl('div', { cls: 'rw-quick-add-panel' });
+        const outputEl     = el.createDiv({ cls: 'rw-translator-output' });
+        const quickAddEl   = el.createDiv({ cls: 'rw-quick-add-panel' });
 
         // Shared quick-add form — shown below output when a missing word is clicked
         const showQuickAdd = (englishWord: string, doTranslate: () => void) => {
@@ -1495,8 +1494,8 @@ class RootweaveView extends ItemView {
             const { form: suggested, hint } = suggestConlangWord(
                 englishWord, this.roots, this.phon, this.plugin.phonModel
             );
-            const panel  = quickAddEl.createEl('div', { cls: 'rw-qa-inner' });
-            panel.createEl('span', { cls: 'rw-qa-label', text: `Add "${englishWord}" →` });
+            const panel  = quickAddEl.createDiv({ cls: 'rw-qa-inner' });
+            panel.createSpan({ cls: 'rw-qa-label', text: `Add "${englishWord}" →` });
             const formIn = panel.createEl('input', {
                 cls: 'rw-input rw-qa-input',
                 attr: { type: 'text', value: suggested, placeholder: 'conlang word' },
@@ -1505,7 +1504,7 @@ class RootweaveView extends ItemView {
             ['noun','verb','adj','adv','other'].forEach(p =>
                 posSel.createEl('option', { value: p, text: p })
             );
-            if (hint) panel.createEl('span', { cls: 'rw-qa-hint', text: `💡 ${hint}` });
+            if (hint) panel.createSpan({ cls: 'rw-qa-hint', text: `💡 ${hint}` });
 
             const saveBtn = panel.createEl('button', { cls: 'rw-btn rw-btn-sm rw-btn-primary', text: 'Save' });
             const skipBtn = panel.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Skip' });
@@ -1572,23 +1571,23 @@ class RootweaveView extends ItemView {
             const foundWords = realWords.filter((t: TokenResult) => t.translated !== null);
             const pct        = realWords.length ? Math.round(foundWords.length / realWords.length * 100) : 100;
             const confCls    = pct >= 85 ? 'rw-conf-high' : pct >= 60 ? 'rw-conf-mid' : 'rw-conf-low';
-            const confRow    = outputEl.createEl('div', { cls: 'rw-trans-conf-row' });
-            confRow.createEl('span', { cls: `rw-conf ${confCls}`, text: `${pct}% coverage` });
-            confRow.createEl('span', { cls: 'rw-trans-conf-detail', text: ` — ${foundWords.length} of ${realWords.length} words found` });
+            const confRow    = outputEl.createDiv({ cls: 'rw-trans-conf-row' });
+            confRow.createSpan({ cls: `rw-conf ${confCls}`, text: `${pct}% coverage` });
+            confRow.createSpan({ cls: 'rw-trans-conf-detail', text: ` — ${foundWords.length} of ${realWords.length} words found` });
 
             // ── Render lines ──────────────────────────────────────────────────
-            const linesWrap = outputEl.createEl('div', { cls: 'rw-trans-lines' });
+            const linesWrap = outputEl.createDiv({ cls: 'rw-trans-lines' });
 
             lineResults.forEach((results, li) => {
-                if (results.length === 0) { linesWrap.createEl('div', { cls: 'rw-trans-blank' }); return; }
+                if (results.length === 0) { linesWrap.createDiv({ cls: 'rw-trans-blank' }); return; }
 
                 if (glossChk.checked) {
-                    const gloss    = linesWrap.createEl('div', { cls: 'rw-gloss' });
-                    const origRow  = gloss.createEl('div', { cls: 'rw-gloss-row rw-gloss-original' });
-                    const transRow = gloss.createEl('div', { cls: 'rw-gloss-row rw-gloss-translation' });
+                    const gloss    = linesWrap.createDiv({ cls: 'rw-gloss' });
+                    const origRow  = gloss.createDiv({ cls: 'rw-gloss-row rw-gloss-original' });
+                    const transRow = gloss.createDiv({ cls: 'rw-gloss-row rw-gloss-translation' });
                     results.forEach(({ prefix, word, suffix, translated }) => {
-                        const orig  = origRow.createEl('span',  { cls: 'rw-gloss-cell', text: prefix + word + suffix });
-                        const trans = transRow.createEl('span', { cls: 'rw-gloss-cell' });
+                        const orig  = origRow.createSpan({ cls: 'rw-gloss-cell', text: prefix + word + suffix });
+                        const trans = transRow.createSpan({ cls: 'rw-gloss-cell' });
                         if (translated) {
                             trans.setText(translated); trans.addClass('rw-gloss-found');
                             orig.title = `→ ${translated}`;
@@ -1601,19 +1600,19 @@ class RootweaveView extends ItemView {
                         }
                     });
                 } else {
-                    const lineEl = linesWrap.createEl('div', { cls: 'rw-translation-line', attr: { 'data-line': String(li) } });
+                    const lineEl = linesWrap.createDiv({ cls: 'rw-translation-line', attr: { 'data-line': String(li) } });
                     results.forEach(({ prefix, word, suffix, meaning, translated }, i) => {
                         if (i > 0) lineEl.appendText(' ');
                         if (prefix) lineEl.appendText(prefix);
                         if (translated) {
-                            const s = lineEl.createEl('span', { cls: 'rw-word-found', text: translated });
+                            const s = lineEl.createSpan({ cls: 'rw-word-found', text: translated });
                             s.title = `${word} → ${meaning}`;
                         } else if (direction === 'forward') {
-                            const s = lineEl.createEl('span', { cls: 'rw-word-missing rw-word-addable', text: word });
+                            const s = lineEl.createSpan({ cls: 'rw-word-missing rw-word-addable', text: word });
                             s.title = 'Click to add to dictionary';
                             s.addEventListener('click', () => showQuickAdd(word, doTranslate));
                         } else {
-                            const s = lineEl.createEl('span', { cls: 'rw-word-missing', text: word });
+                            const s = lineEl.createSpan({ cls: 'rw-word-missing', text: word });
                             s.title = 'Not in dictionary';
                         }
                         if (suffix) lineEl.appendText(suffix);
@@ -1651,15 +1650,15 @@ class RootweaveView extends ItemView {
                         transRhymeData.map(d => d?.key || `__${Math.random()}`)
                     );
 
-                    const rhymeSection = outputEl.createEl('div', { cls: 'rw-rhyme-section' });
-                    rhymeSection.createEl('div', { cls: 'rw-label', text: 'Rhyme analysis' });
-                    const schemeRow = rhymeSection.createEl('div', { cls: 'rw-rhyme-row' });
-                    schemeRow.createEl('span', { cls: 'rw-rhyme-label', text: 'Source:' });
-                    schemeRow.createEl('span', { cls: 'rw-rhyme-scheme', text: srcScheme.join(' ') });
-                    schemeRow.createEl('span', { cls: 'rw-rhyme-label', text: 'Translation:' });
+                    const rhymeSection = outputEl.createDiv({ cls: 'rw-rhyme-section' });
+                    rhymeSection.createDiv({ cls: 'rw-label', text: 'Rhyme analysis' });
+                    const schemeRow = rhymeSection.createDiv({ cls: 'rw-rhyme-row' });
+                    schemeRow.createSpan({ cls: 'rw-rhyme-label', text: 'Source:' });
+                    schemeRow.createSpan({ cls: 'rw-rhyme-scheme', text: srcScheme.join(' ') });
+                    schemeRow.createSpan({ cls: 'rw-rhyme-label', text: 'Translation:' });
 
                     if (!hasPhon) {
-                        schemeRow.createEl('span', { cls: 'rw-conf rw-conf-low', text: 'set up phonology to check' });
+                        schemeRow.createSpan({ cls: 'rw-conf rw-conf-low', text: 'set up phonology to check' });
                     } else {
                         const lineMatches = srcScheme.map((srcLetter, i) => {
                             if (!transRhymeData[i]) return null;
@@ -1668,13 +1667,13 @@ class RootweaveView extends ItemView {
                             return transScheme[i] === transScheme[sibling];
                         });
 
-                        const schemeSpan = schemeRow.createEl('span', { cls: 'rw-rhyme-scheme' });
+                        const schemeSpan = schemeRow.createSpan({ cls: 'rw-rhyme-scheme' });
                         srcScheme.forEach((_l, i) => {
                             const match = lineMatches[i];
                             const cls   = match === false ? 'rw-rhyme-letter rw-rhyme-break'
                                         : match === true  ? 'rw-rhyme-letter rw-rhyme-ok'
                                         :                   'rw-rhyme-letter rw-rhyme-unknown';
-                            schemeSpan.createEl('span', { cls, text: transScheme[i] });
+                            schemeSpan.createSpan({ cls, text: transScheme[i] });
                             if (i < srcScheme.length - 1) schemeSpan.appendText(' ');
                         });
 
@@ -1699,16 +1698,16 @@ class RootweaveView extends ItemView {
                                 .sort((a, b) => (b.exact ? 1 : b.sim) - (a.exact ? 1 : a.sim))
                                 .slice(0, 3);
 
-                            const fixRow = rhymeSection.createEl('div', { cls: 'rw-rhyme-fix-row' });
+                            const fixRow = rhymeSection.createDiv({ cls: 'rw-rhyme-fix-row' });
                             const endStr = brokenWord ? ` "${brokenWord}"` : '';
-                            fixRow.createEl('span', { cls: 'rw-rhyme-fix-label',
+                            fixRow.createSpan({ cls: 'rw-rhyme-fix-label',
                                 text: `Line ${i + 1}${endStr} breaks rhyme (${srcLetter})` });
                             if (candidates.length > 0) {
                                 fixRow.appendText(' — try: ');
                                 candidates.forEach((c, ci) => {
                                     if (ci > 0) fixRow.appendText(', ');
                                     const badge = c.exact ? '✓' : `${Math.round(c.sim * 100)}%`;
-                                    fixRow.createEl('span', {
+                                    fixRow.createSpan({
                                         cls: 'rw-rhyme-alt' + (c.exact ? ' rw-rhyme-alt-exact' : ''),
                                         text: `${c.word} (${badge})`,
                                     });
@@ -1722,7 +1721,7 @@ class RootweaveView extends ItemView {
             }
 
             // ── Copy + TTS ────────────────────────────────────────────────────
-            const btnRow = outputEl.createEl('div', { cls: 'rw-trans-btn-row' });
+            const btnRow = outputEl.createDiv({ cls: 'rw-trans-btn-row' });
             btnRow.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Copy' })
                 .addEventListener('click', () => {
                     const text = lineResults
@@ -1773,13 +1772,13 @@ class RootweaveView extends ItemView {
     private renderExport(el: HTMLElement) {
         el.createEl('p', { cls: 'rw-subtitle', text: 'Your data already lives in .rootweave/ as Markdown files. Export creates a single consolidated snapshot.' });
 
-        const stats = el.createEl('div', { cls: 'rw-export-stats' });
+        const stats = el.createDiv({ cls: 'rw-export-stats' });
         stats.createEl('p', { text: `${this.roots.length} root${this.roots.length !== 1 ? 's' : ''}` });
         stats.createEl('p', { text: `${this.words.length} word${this.words.length !== 1 ? 's' : ''}` });
         stats.createEl('p', { text: `${this.rules.length} grammar rule${this.rules.length !== 1 ? 's' : ''}` });
 
         el.createEl('p', { cls: 'rw-label', text: 'Source files (open directly):' });
-        const links = el.createEl('div', { cls: 'rw-file-links' });
+        const links = el.createDiv({ cls: 'rw-file-links' });
         Object.values(FILES).forEach(path => {
             const name = path.split('/').pop() ?? path;
             links.createEl('button', { cls: 'rw-btn rw-btn-sm rw-file-link', text: name })
@@ -1790,7 +1789,7 @@ class RootweaveView extends ItemView {
                 });
         });
 
-        el.createEl('div', { cls: 'rw-divider' });
+        el.createDiv({ cls: 'rw-divider' });
 
         el.createEl('button', { cls: 'rw-btn', text: 'Open Root Graph' })
             .addEventListener('click', () => { void this.plugin.openGraph(); });
@@ -1829,7 +1828,7 @@ class RootweaveView extends ItemView {
             onChange: () => void,
             onDelete: () => void
         ) => {
-            const row    = parent.createEl('div', { cls: 'rw-phon-row' });
+            const row    = parent.createDiv({ cls: 'rw-phon-row' });
             const symIn  = row.createEl('input', { cls: 'rw-input rw-phon-sym',  attr: { type: 'text', value: ph.symbol, placeholder: 'ph' } });
             const pronIn = row.createEl('input', { cls: 'rw-input rw-phon-pron', attr: { type: 'text', value: ph.pron,   placeholder: 'sound' } });
             symIn.addEventListener('change',  () => { ph.symbol = symIn.value.trim(); onChange(); });
@@ -1845,10 +1844,10 @@ class RootweaveView extends ItemView {
         };
 
         // ── Vowels ────────────────────────────────────────────────────────────
-        const vowSection = el.createEl('div', { cls: 'rw-phon-section' });
+        const vowSection = el.createDiv({ cls: 'rw-phon-section' });
         vowSection.createEl('p', { cls: 'rw-label', text: 'Vowels' });
         vowSection.createEl('p', { cls: 'rw-subtitle', text: 'Symbol = how you type it, Sound = how to say it (e.g. "ah", "/a/").' });
-        const vowList = vowSection.createEl('div', { cls: 'rw-phon-list' });
+        const vowList = vowSection.createDiv({ cls: 'rw-phon-list' });
 
         const redrawVowels = () => {
             vowList.empty();
@@ -1866,12 +1865,12 @@ class RootweaveView extends ItemView {
                 savePhon(); redrawVowels();
             });
 
-        el.createEl('div', { cls: 'rw-divider' });
+        el.createDiv({ cls: 'rw-divider' });
 
         // ── Consonants ────────────────────────────────────────────────────────
-        const conSection = el.createEl('div', { cls: 'rw-phon-section' });
+        const conSection = el.createDiv({ cls: 'rw-phon-section' });
         conSection.createEl('p', { cls: 'rw-label', text: 'Consonants' });
-        const conList = conSection.createEl('div', { cls: 'rw-phon-list' });
+        const conList = conSection.createDiv({ cls: 'rw-phon-list' });
 
         const redrawConsonants = () => {
             conList.empty();
@@ -1889,12 +1888,12 @@ class RootweaveView extends ItemView {
                 savePhon(); redrawConsonants();
             });
 
-        el.createEl('div', { cls: 'rw-divider' });
+        el.createDiv({ cls: 'rw-divider' });
 
         // ── Validation mode ───────────────────────────────────────────────────
-        const modeSection = el.createEl('div', { cls: 'rw-phon-section' });
+        const modeSection = el.createDiv({ cls: 'rw-phon-section' });
         modeSection.createEl('p', { cls: 'rw-label', text: 'Validation mode' });
-        const modeRow = modeSection.createEl('div', { cls: 'rw-mode-row' });
+        const modeRow = modeSection.createDiv({ cls: 'rw-mode-row' });
         const makeMode = (id: 'strict' | 'permissive', label: string, desc: string) => {
             const btn = modeRow.createEl('button', {
                 cls: 'rw-mode-btn' + (this.phon.mode === id ? ' is-active' : ''),
@@ -1911,7 +1910,7 @@ class RootweaveView extends ItemView {
         makeMode('strict',     'Strict',     'Warn if a word uses sounds not in your inventory.');
         makeMode('permissive', 'Permissive', 'Allow any characters; inventory is for reference only.');
 
-        const bannedWrap = modeSection.createEl('div', { cls: 'rw-modal-field' });
+        const bannedWrap = modeSection.createDiv({ cls: 'rw-modal-field' });
         bannedWrap.createEl('label', { text: 'Banned clusters (comma-separated):' });
         const bannedIn = bannedWrap.createEl('input', { cls: 'rw-input', attr: { type: 'text', value: this.phon.banned.join(', '), placeholder: 'e.g. kk, str' } });
         bannedIn.addEventListener('change', () => {
@@ -1919,15 +1918,15 @@ class RootweaveView extends ItemView {
             savePhon();
         });
 
-        el.createEl('div', { cls: 'rw-divider' });
+        el.createDiv({ cls: 'rw-divider' });
 
         // ── Try a word ────────────────────────────────────────────────────────
-        const trySection = el.createEl('div', { cls: 'rw-phon-section' });
+        const trySection = el.createDiv({ cls: 'rw-phon-section' });
         trySection.createEl('p', { cls: 'rw-label', text: 'Try a word' });
         trySection.createEl('p', { cls: 'rw-subtitle', text: 'See how a word breaks into phonemes and syllables. Click a syllable to correct the stress — the network learns each time.' });
 
         const tryInput  = trySection.createEl('input', { cls: 'rw-input rw-input-lg', attr: { type: 'text', placeholder: 'Type a word…' } });
-        const tryResult = trySection.createEl('div',   { cls: 'rw-phon-try-result' });
+        const tryResult = trySection.createDiv({ cls: 'rw-phon-try-result' });
 
         const tryWord = (forcedStress?: number) => {
             tryResult.empty();
@@ -1945,12 +1944,12 @@ class RootweaveView extends ItemView {
             if (!tokens.length) return;
 
             // Syllable breakdown display
-            const breakRow = tryResult.createEl('div', { cls: 'rw-phon-break' });
+            const breakRow = tryResult.createDiv({ cls: 'rw-phon-break' });
             syllTokens.forEach((syll, si) => {
-                if (si > 0) breakRow.createEl('span', { cls: 'rw-phon-dot', text: ' · ' });
+                if (si > 0) breakRow.createSpan({ cls: 'rw-phon-dot', text: ' · ' });
                 syll.forEach(p => {
                     const ph = allPh.find(x => x.symbol === p);
-                    const sp = breakRow.createEl('span', { cls: ph ? 'rw-phon-token' : 'rw-phon-unknown', text: p });
+                    const sp = breakRow.createSpan({ cls: ph ? 'rw-phon-token' : 'rw-phon-unknown', text: p });
                     if (ph) sp.title = ph.pron;
                 });
             });
@@ -1996,24 +1995,24 @@ class RootweaveView extends ItemView {
             if (activeStress !== null && sylls.length > 0) {
                 const pron    = phonReconstruct(syllTokens, activeStress);
                 const reading = phonPronReading(syllTokens, activeStress, this.phon);
-                const pronRow = tryResult.createEl('div', { cls: 'rw-phon-pron-row' });
+                const pronRow = tryResult.createDiv({ cls: 'rw-phon-pron-row' });
                 renderSyllableDisplay(pronRow, syllTokens, activeStress);
-                pronRow.createEl('span', { cls: 'rw-phon-reading', text: reading });
+                pronRow.createSpan({ cls: 'rw-phon-reading', text: reading });
                 const ttsBtn = pronRow.createEl('button', { cls: 'rw-btn rw-btn-sm rw-tts-btn', text: '🔊' });
                 ttsBtn.addEventListener('click', () => ttsSpeak(reading, ttsBtn));
 
                 if (isOverride) {
-                    pronRow.createEl('span', { cls: 'rw-conf rw-conf-high', text: '✓ corrected' });
+                    pronRow.createSpan({ cls: 'rw-conf rw-conf-high', text: '✓ corrected' });
                 } else if (model) {
                     const { confidence } = predictStress(sylls, model);
                     const confPct = Math.round(confidence * 100);
                     const confCls = confidence > 0.75 ? 'rw-conf-high' : confidence > 0.45 ? 'rw-conf-mid' : 'rw-conf-low';
-                    pronRow.createEl('span', { cls: `rw-conf ${confCls}`, text: `${confPct}% confident` });
+                    pronRow.createSpan({ cls: `rw-conf ${confCls}`, text: `${confPct}% confident` });
                 }
 
                 if (sylls.length > 1) {
-                    const corrRow = tryResult.createEl('div', { cls: 'rw-phon-corr-row' });
-                    corrRow.createEl('span', { cls: 'rw-label', text: isOverride ? 'Change: ' : 'Correct: ' });
+                    const corrRow = tryResult.createDiv({ cls: 'rw-phon-corr-row' });
+                    corrRow.createSpan({ cls: 'rw-label', text: isOverride ? 'Change: ' : 'Correct: ' });
                     const corrIn = corrRow.createEl('input', {
                         cls: 'rw-input rw-phon-corr-input',
                         attr: { type: 'text', value: pron, placeholder: `'syll-syll  (apostrophe = stress)` },
@@ -2027,8 +2026,8 @@ class RootweaveView extends ItemView {
                     corrRow.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Submit' })
                         .addEventListener('click', applyCorr);
 
-                    const stressRow = tryResult.createEl('div', { cls: 'rw-phon-stress-row' });
-                    stressRow.createEl('span', { cls: 'rw-label', text: 'or click: ' });
+                    const stressRow = tryResult.createDiv({ cls: 'rw-phon-stress-row' });
+                    stressRow.createSpan({ cls: 'rw-label', text: 'or click: ' });
                     syllTokens.forEach((syll, si) => {
                         stressRow.createEl('button', {
                             cls: 'rw-btn rw-btn-sm rw-phon-syll' + (si === activeStress ? ' is-stressed' : ''),
@@ -2042,8 +2041,8 @@ class RootweaveView extends ItemView {
                 const needed = Math.max(0, 2 - this.plugin.phonExamples.length);
                 tryResult.createEl('p', { cls: 'rw-empty', text: `${needed} more example${needed !== 1 ? 's' : ''} needed to enable predictions.` });
 
-                const corrRow = tryResult.createEl('div', { cls: 'rw-phon-corr-row' });
-                corrRow.createEl('span', { cls: 'rw-label', text: 'Type stress: ' });
+                const corrRow = tryResult.createDiv({ cls: 'rw-phon-corr-row' });
+                corrRow.createSpan({ cls: 'rw-label', text: 'Type stress: ' });
                 const corrIn = corrRow.createEl('input', {
                     cls: 'rw-input rw-phon-corr-input',
                     attr: { type: 'text', placeholder: `'syll-syll  (apostrophe = stress)` },
@@ -2057,8 +2056,8 @@ class RootweaveView extends ItemView {
                 corrRow.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Submit' })
                     .addEventListener('click', applyCorr);
 
-                const stressRow = tryResult.createEl('div', { cls: 'rw-phon-stress-row' });
-                stressRow.createEl('span', { cls: 'rw-label', text: 'or click: ' });
+                const stressRow = tryResult.createDiv({ cls: 'rw-phon-stress-row' });
+                stressRow.createSpan({ cls: 'rw-label', text: 'or click: ' });
                 syllTokens.forEach((syll, si) => {
                     stressRow.createEl('button', {
                         cls: 'rw-btn rw-btn-sm rw-phon-syll',
@@ -2079,10 +2078,10 @@ class RootweaveView extends ItemView {
 
         tryInput.addEventListener('input', () => tryWord());
 
-        el.createEl('div', { cls: 'rw-divider' });
+        el.createDiv({ cls: 'rw-divider' });
 
         // ── Phoneme map ───────────────────────────────────────────────────────
-        const mapSection = el.createEl('div', { cls: 'rw-phon-section' });
+        const mapSection = el.createDiv({ cls: 'rw-phon-section' });
         mapSection.createEl('p', { cls: 'rw-label', text: 'Phoneme map' });
 
         const model = this.plugin.phonModel;
@@ -2137,10 +2136,10 @@ class RootweaveView extends ItemView {
             mapSection.createEl('p', { cls: 'rw-empty', text: `Map appears after ${needed} more stress example${needed !== 1 ? 's' : ''}. Use "Try a word" to add them.` });
         }
 
-        el.createEl('div', { cls: 'rw-divider' });
+        el.createDiv({ cls: 'rw-divider' });
 
         // ── Notes ─────────────────────────────────────────────────────────────
-        const notesSection = el.createEl('div', { cls: 'rw-phon-section' });
+        const notesSection = el.createDiv({ cls: 'rw-phon-section' });
         notesSection.createEl('p', { cls: 'rw-label', text: 'Notes' });
         const notesArea = notesSection.createEl('textarea', { cls: 'rw-textarea', attr: { placeholder: 'Free-form phonology notes…', rows: '3' } });
         notesArea.value = this.phon.notes;
@@ -2149,8 +2148,8 @@ class RootweaveView extends ItemView {
         // ── Observations ──────────────────────────────────────────────────────
         const obs = inferPhono(this.words, this.phon);
         if (obs.length) {
-            el.createEl('div', { cls: 'rw-divider' });
-            const obsSection = el.createEl('div', { cls: 'rw-phon-section' });
+            el.createDiv({ cls: 'rw-divider' });
+            const obsSection = el.createDiv({ cls: 'rw-phon-section' });
             obsSection.createEl('p', { cls: 'rw-label', text: 'Phonotactics observations' });
             obsSection.createEl('p', { cls: 'rw-subtitle', text: 'Automatically inferred from your word list.' });
             const obsList = obsSection.createEl('ul', { cls: 'rw-obs-list' });
@@ -2159,8 +2158,8 @@ class RootweaveView extends ItemView {
 
         // ── Training info ─────────────────────────────────────────────────────
         if (this.plugin.phonExamples.length > 0) {
-            el.createEl('div', { cls: 'rw-divider' });
-            const trainSection = el.createEl('div', { cls: 'rw-phon-section' });
+            el.createDiv({ cls: 'rw-divider' });
+            const trainSection = el.createDiv({ cls: 'rw-phon-section' });
             trainSection.createEl('p', { cls: 'rw-label', text: 'Training data' });
             trainSection.createEl('p', { cls: 'rw-subtitle', text: `${this.plugin.phonExamples.length} stress example${this.plugin.phonExamples.length !== 1 ? 's' : ''} saved.` });
 
@@ -2224,11 +2223,11 @@ class GraphView extends ItemView {
         el.addClass('rw-graph-view');
 
         // Toolbar
-        const bar = el.createEl('div', { cls: 'rw-graph-bar' });
-        const legend = bar.createEl('span', { cls: 'rw-graph-legend' });
-        legend.createEl('span', { cls: 'rw-legend-root', text: '●' });
+        const bar = el.createDiv({ cls: 'rw-graph-bar' });
+        const legend = bar.createSpan({ cls: 'rw-graph-legend' });
+        legend.createSpan({ cls: 'rw-legend-root', text: '●' });
         legend.appendText(' Root   ');
-        legend.createEl('span', { cls: 'rw-legend-word', text: '●' });
+        legend.createSpan({ cls: 'rw-legend-word', text: '●' });
         legend.appendText(' Word');
         bar.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Refresh' })
             .addEventListener('click', () => { void this.onOpen(); });
@@ -2238,7 +2237,7 @@ class GraphView extends ItemView {
             return;
         }
 
-        const canvas = el.createEl('div', { cls: 'rw-graph-canvas' });
+        const canvas = el.createDiv({ cls: 'rw-graph-canvas' });
         // Wait one frame so the container has layout dimensions before we measure it
         window.requestAnimationFrame(() => { this.buildGraph(canvas); });
     }
@@ -2308,7 +2307,7 @@ class GraphView extends ItemView {
         // ── Nodes ──────────────────────────────────────────────────────────────
 
         const nodeEls = new Map<string, SVGGElement>();
-        const tip = container.createEl('div', { cls: 'rw-graph-tip' });
+        const tip = container.createDiv({ cls: 'rw-graph-tip' });
 
         nodes.forEach(node => {
             const g = mksvg('g') as SVGGElement;
@@ -2403,7 +2402,7 @@ class RootModal extends Modal {
         contentEl.createEl('h2', { text: this.existing ? 'Edit Root' : 'Add Root' });
 
         const field = (label: string, value: string, placeholder: string): HTMLInputElement => {
-            const wrap = contentEl.createEl('div', { cls: 'rw-modal-field' });
+            const wrap = contentEl.createDiv({ cls: 'rw-modal-field' });
             wrap.createEl('label', { text: label });
             return wrap.createEl('input', { cls: 'rw-input', attr: { type: 'text', value, placeholder } });
         };
@@ -2453,7 +2452,7 @@ class WordModal extends Modal {
         contentEl.createEl('h2', { text: this.existing ? 'Edit Word' : 'Add Word' });
 
         const field = (label: string, value: string, placeholder: string): HTMLInputElement => {
-            const wrap = contentEl.createEl('div', { cls: 'rw-modal-field' });
+            const wrap = contentEl.createDiv({ cls: 'rw-modal-field' });
             wrap.createEl('label', { text: label });
             return wrap.createEl('input', { cls: 'rw-input', attr: { type: 'text', value, placeholder } });
         };
@@ -2501,7 +2500,7 @@ class RuleModal extends Modal {
         contentEl.createEl('h2', { text: this.existing ? 'Edit Rule' : 'Add Rule' });
 
         const field = (label: string, value: string, placeholder: string): HTMLInputElement => {
-            const wrap = contentEl.createEl('div', { cls: 'rw-modal-field' });
+            const wrap = contentEl.createDiv({ cls: 'rw-modal-field' });
             wrap.createEl('label', { text: label });
             return wrap.createEl('input', { cls: 'rw-input', attr: { type: 'text', value, placeholder } });
         };
@@ -2512,7 +2511,7 @@ class RuleModal extends Modal {
         const exampleIn = field('Example', this.existing?.example ?? '', 'e.g. vel → veliu (lights)');
         const notesIn   = field('Notes',   this.existing?.notes   ?? '', 'Optional');
 
-        const typeWrap = contentEl.createEl('div', { cls: 'rw-modal-field' });
+        const typeWrap = contentEl.createDiv({ cls: 'rw-modal-field' });
         typeWrap.createEl('label', { text: 'Type' });
         const typeSel = typeWrap.createEl('select', { cls: 'rw-select' });
         typeSel.createEl('option', { value: 'prefix',  text: 'prefix — added before the word (e.g. on-)' });
@@ -2554,130 +2553,170 @@ class RootweaveSettingTab extends PluginSettingTab {
         this.plugin = plugin;
     }
 
-    display() {
-        const { containerEl } = this;
-        containerEl.empty();
+    getSettingDefinitions(): SettingDefinitionItem[] {
+        return [
+            this.languageDef(),
+            { type: 'group', heading: 'Import', items: this.importDefs() },
+            { type: 'group', heading: 'Data tools', items: [this.cleanseDef()] },
+        ];
+    }
 
-        new Setting(containerEl)
-            .setName('Language name')
-            .setDesc('Used in export file names and headings.')
-            .addText(text => text
-                .setPlaceholder('My Conlang')
-                .setValue(this.plugin.settings.language)
-                .onChange(value => { this.plugin.settings.language = value; void this.plugin.saveSettings(); })
-            );
+    private languageDef(): SettingDefinitionRender {
+        return {
+            name: 'Language name',
+            desc: 'Used in export file names and headings.',
+            render: setting => {
+                setting
+                    .setName('Language name')
+                    .setDesc('Used in export file names and headings.')
+                    .addText(text => text
+                        .setPlaceholder('My Conlang')
+                        .setValue(this.plugin.settings.language)
+                        .onChange(value => { this.plugin.settings.language = value; void this.plugin.saveSettings(); })
+                    );
+            },
+        };
+    }
 
-        // ── Import ─────────────────────────────────────────────────────────────
-        new Setting(containerEl).setName('Import').setHeading();
-
+    private importDefs(): SettingDefinitionRender[] {
         let importType: 'roots' | 'words' = 'roots';
         const ROOT_TOKENS = 'Tokens: [root], [alternates], [meaning], [category], [notes]';
         const WORD_TOKENS = 'Tokens: [word], [meaning], [pos]';
+        let formatSetting: Setting | null = null;
+        let templateEl: HTMLInputElement | undefined;
+        let dataEl: HTMLTextAreaElement | undefined;
 
-        const tokenHint = containerEl.createEl('p', { cls: 'setting-item-description', text: ROOT_TOKENS });
+        const formatDesc = () =>
+            `Arrange tokens to match your data. Each line is parsed against this pattern. ${importType === 'roots' ? ROOT_TOKENS : WORD_TOKENS}`;
 
-        new Setting(containerEl)
-            .setName('Type')
-            .addDropdown(dd => dd
-                .addOption('roots', 'Roots')
-                .addOption('words', 'Words')
-                .setValue('roots')
-                .onChange(val => {
-                    importType = val as 'roots' | 'words';
-                    tokenHint.setText(importType === 'roots' ? ROOT_TOKENS : WORD_TOKENS);
-                })
-            );
-
-        let templateEl: HTMLInputElement;
-        new Setting(containerEl)
-            .setName('Format template')
-            .setDesc('Arrange tokens to match your data. Each line is parsed against this pattern.')
-            .addText(text => {
-                text.setPlaceholder('[root] [meaning]').setValue('[root] [meaning]');
-                templateEl = text.inputEl;
-            });
-
-        let dataEl: HTMLTextAreaElement;
-        new Setting(containerEl)
-            .setName('Data')
-            .setDesc('One entry per line. Lines starting with # are skipped.')
-            .addTextArea(ta => {
-                ta.setPlaceholder('vel light\nkar fire');
-                ta.inputEl.rows = 10;
-                ta.inputEl.addClass('rw-import-textarea');
-                dataEl = ta.inputEl;
-            });
-
-        new Setting(containerEl)
-            .addButton(btn => btn.setButtonText('Import').setCta().onClick(() => {
-                const tmpl = templateEl?.value.trim() ?? '';
-                const data = dataEl?.value.trim()     ?? '';
-                if (!tmpl) { new Notice('Enter a format template first.'); return; }
-                if (!data) { new Notice('Paste some data to import.'); return; }
-
-                if (importType === 'roots') {
-                    const parsed = importRoots(tmpl, data);
-                    if (!parsed.length) { new Notice('No lines matched the template — check your format.'); return; }
-                    void this.plugin.loadRoots().then(existing => {
-                        const merged = [...existing];
-                        let added = 0, skipped = 0;
-                        for (const r of parsed) {
-                            if (merged.some(e => e.root === r.root)) { skipped++; continue; }
-                            merged.push(r); added++;
-                        }
-                        void this.plugin.saveRoots(merged)
-                            .then(() => { new Notice(`Imported ${added} root${added !== 1 ? 's' : ''}${skipped ? `, skipped ${skipped}` : ''}.`); void this.plugin.reloadView(); })
-                            .catch(e => new Notice(`Save failed: ${e}`));
-                    }).catch(e => new Notice(`Load failed: ${e}`));
-                } else {
-                    const parsed = importWords(tmpl, data);
-                    if (!parsed.length) { new Notice('No lines matched the template — check your format.'); return; }
-                    void this.plugin.loadWords().then(existing => {
-                        const merged = [...existing];
-                        let added = 0, skipped = 0;
-                        for (const w of parsed) {
-                            if (merged.some(e => e.word.toLowerCase() === w.word.toLowerCase())) { skipped++; continue; }
-                            merged.push(w); added++;
-                        }
-                        void this.plugin.saveWords(merged)
-                            .then(() => { new Notice(`Imported ${added} word${added !== 1 ? 's' : ''}${skipped ? `, skipped ${skipped}` : ''}.`); void this.plugin.reloadView(); })
-                            .catch(e => new Notice(`Save failed: ${e}`));
-                    }).catch(e => new Notice(`Load failed: ${e}`));
-                }
-            }));
-
-        // ── Cleanse ────────────────────────────────────────────────────────────
-        new Setting(containerEl).setName('Data tools').setHeading();
-
-        new Setting(containerEl)
-            .setName('Cleanse special characters')
-            .setDesc('Replace accented and non-ASCII letters in all roots and words with plain equivalents (e.g. Ñ→N, é→e, ü→u, æ→ae). Edits your files — make a backup first.')
-            .addButton(btn => btn
-                .setButtonText('Cleanse')
-                .setClass('mod-warning')
-                .onClick(() => {
-                    void Promise.all([
-                        this.plugin.loadRoots(),
-                        this.plugin.loadWords(),
-                    ]).then(([roots, words]) => {
-                        const cleanRoots = roots.map(r => ({
-                            ...r,
-                            root:       stripDiacritics(r.root),
-                            alternates: r.alternates.map((a: string) => stripDiacritics(a)),
-                        }));
-                        const cleanWords = words.map(w => ({
-                            ...w,
-                            word: stripDiacritics(w.word),
-                        }));
-                        void Promise.all([
-                            this.plugin.saveRoots(cleanRoots),
-                            this.plugin.saveWords(cleanWords),
-                        ]).then(() => {
-                            new Notice(`Cleansed ${roots.length} roots and ${words.length} words.`);
-                            void this.plugin.reloadView();
+        return [
+            {
+                name: 'Import type',
+                desc: 'Whether the pasted data below is parsed as roots or dictionary words.',
+                render: setting => {
+                    setting
+                        .setName('Type')
+                        .addDropdown(dd => dd
+                            .addOption('roots', 'Roots')
+                            .addOption('words', 'Words')
+                            .setValue('roots')
+                            .onChange(val => {
+                                importType = val as 'roots' | 'words';
+                                formatSetting?.setDesc(formatDesc());
+                            })
+                        );
+                },
+            },
+            {
+                name: 'Format template',
+                desc: 'Arrange tokens to match your data. Each line is parsed against this pattern.',
+                render: setting => {
+                    formatSetting = setting;
+                    setting
+                        .setName('Format template')
+                        .setDesc(formatDesc())
+                        .addText(text => {
+                            text.setPlaceholder('[root] [meaning]').setValue('[root] [meaning]');
+                            templateEl = text.inputEl;
                         });
-                    });
-                })
-            );
+                },
+            },
+            {
+                name: 'Import data',
+                desc: 'One entry per line. Lines starting with # are skipped.',
+                render: setting => {
+                    setting
+                        .setName('Data')
+                        .setDesc('One entry per line. Lines starting with # are skipped.')
+                        .addTextArea(ta => {
+                            ta.setPlaceholder('vel light\nkar fire');
+                            ta.inputEl.rows = 10;
+                            ta.inputEl.addClass('rw-import-textarea');
+                            dataEl = ta.inputEl;
+                        });
+                },
+            },
+            {
+                name: 'Import',
+                desc: 'Merge the parsed roots or words into your lexicon.',
+                render: setting => {
+                    setting.addButton(btn => btn.setButtonText('Import').setCta().onClick(() => {
+                        const tmpl = templateEl?.value.trim() ?? '';
+                        const data = dataEl?.value.trim()     ?? '';
+                        if (!tmpl) { new Notice('Enter a format template first.'); return; }
+                        if (!data) { new Notice('Paste some data to import.'); return; }
+
+                        if (importType === 'roots') {
+                            const parsed = importRoots(tmpl, data);
+                            if (!parsed.length) { new Notice('No lines matched the template — check your format.'); return; }
+                            void this.plugin.loadRoots().then(existing => {
+                                const merged = [...existing];
+                                let added = 0, skipped = 0;
+                                for (const r of parsed) {
+                                    if (merged.some(e => e.root === r.root)) { skipped++; continue; }
+                                    merged.push(r); added++;
+                                }
+                                void this.plugin.saveRoots(merged)
+                                    .then(() => { new Notice(`Imported ${added} root${added !== 1 ? 's' : ''}${skipped ? `, skipped ${skipped}` : ''}.`); void this.plugin.reloadView(); })
+                                    .catch((e: unknown) => new Notice(`Save failed: ${String(e)}`));
+                            }).catch((e: unknown) => new Notice(`Load failed: ${String(e)}`));
+                        } else {
+                            const parsed = importWords(tmpl, data);
+                            if (!parsed.length) { new Notice('No lines matched the template — check your format.'); return; }
+                            void this.plugin.loadWords().then(existing => {
+                                const merged = [...existing];
+                                let added = 0, skipped = 0;
+                                for (const w of parsed) {
+                                    if (merged.some(e => e.word.toLowerCase() === w.word.toLowerCase())) { skipped++; continue; }
+                                    merged.push(w); added++;
+                                }
+                                void this.plugin.saveWords(merged)
+                                    .then(() => { new Notice(`Imported ${added} word${added !== 1 ? 's' : ''}${skipped ? `, skipped ${skipped}` : ''}.`); void this.plugin.reloadView(); })
+                                    .catch((e: unknown) => new Notice(`Save failed: ${String(e)}`));
+                            }).catch((e: unknown) => new Notice(`Load failed: ${String(e)}`));
+                        }
+                    }));
+                },
+            },
+        ];
+    }
+
+    private cleanseDef(): SettingDefinitionRender {
+        return {
+            name: 'Cleanse special characters',
+            desc: 'Replace accented and non-ASCII letters in all roots and words with plain equivalents (e.g. Ñ→N, é→e, ü→u, æ→ae). Edits your files — make a backup first.',
+            render: setting => {
+                setting
+                    .setName('Cleanse special characters')
+                    .setDesc('Replace accented and non-ASCII letters in all roots and words with plain equivalents (e.g. Ñ→N, é→e, ü→u, æ→ae). Edits your files — make a backup first.')
+                    .addButton(btn => btn
+                        .setButtonText('Cleanse')
+                        .setClass('mod-warning')
+                        .onClick(() => {
+                            void Promise.all([
+                                this.plugin.loadRoots(),
+                                this.plugin.loadWords(),
+                            ]).then(([roots, words]) => {
+                                const cleanRoots = roots.map(r => ({
+                                    ...r,
+                                    root:       stripDiacritics(r.root),
+                                    alternates: r.alternates.map((a: string) => stripDiacritics(a)),
+                                }));
+                                const cleanWords = words.map(w => ({
+                                    ...w,
+                                    word: stripDiacritics(w.word),
+                                }));
+                                void Promise.all([
+                                    this.plugin.saveRoots(cleanRoots),
+                                    this.plugin.saveWords(cleanWords),
+                                ]).then(() => {
+                                    new Notice(`Cleansed ${roots.length} roots and ${words.length} words.`);
+                                    void this.plugin.reloadView();
+                                });
+                            });
+                        })
+                    );
+            },
+        };
     }
 }

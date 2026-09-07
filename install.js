@@ -31,10 +31,10 @@ function build() {
     try {
         execSync('node esbuild.config.mjs production', { stdio: 'inherit' });
     } catch {
-        console.error('\n❌  Build failed. Make sure you ran `npm install` first.');
+        console.error('\n Build failed. Make sure you ran `npm install` first. If it still fails, try downloading from the obsidian community plugin store.');
         process.exit(1);
     }
-    console.log('✅  Build done.\n');
+    console.log('Build done. Go try it out!\n');
 }
 
 // ── 2. Find vaults ────────────────────────────────────────────────────────────
