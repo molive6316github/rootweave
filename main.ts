@@ -1,14 +1,4 @@
-/**
- * Rootweave — Obsidian plugin for conlang worldbuilders
- *
- * Data lives as plain Markdown tables in your vault:
- *   .rootweave/Roots.md      ← root morpheme lexicon
- *   .rootweave/Dictionary.md ← finalized word list
- *   .rootweave/Grammar.md    ← grammar rules
- *
- * You can open and edit these files directly — the plugin is just a
- * convenient UI on top of them.
- */
+
 
 import {
     App,
@@ -25,7 +15,6 @@ import {
     normalizePath,
 } from 'obsidian';
 
-// ─── Constants ────────────────────────────────────────────────────────────────
 
 const VIEW_TYPE       = 'rootweave-view';
 const VIEW_TYPE_GRAPH = 'rootweave-graph';
@@ -37,30 +26,29 @@ const FILES = {
     phonology: '.rootweave/Phonology.md',
 };
 
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Root {
     root: string;
     meaning: string;
     category: string;
     notes: string;
-    alternates: string[]; // other forms, e.g. "sight" for root "see"
+    alternates: string[]; 
 }
 
 interface Word {
     word: string;
     meaning: string;
-    pos: string;     // part of speech
-    roots: string[]; // which roots it came from
+    pos: string;     
+    roots: string[]; 
 }
 
 interface Rule {
-    name: string;                          // e.g. "Plural"
+    name: string;                       
     type: 'prefix' | 'suffix' | 'infix' | 'other';
-    form: string;                          // the affix, e.g. "-iu" or "on-"
-    meaning: string;                       // grammatical meaning, e.g. "plural marker"
-    example: string;                       // optional: "vel → veliu (lights)"
-    notes: string;                         // optional extra info
+    form: string;                          
+    meaning: string;                       
+    example: string;                       
+    notes: string;                        
 }
 
 interface Settings {
@@ -74,7 +62,6 @@ const DEFAULT_RULES: Rule[] = [
     { name: 'Past tense', type: 'prefix', form: 'on-',  meaning: 'past tense',    example: 'vel → onvel (was light)', notes: '' },
 ];
 
-// ─── Phonology types ──────────────────────────────────────────────────────────
 
 interface Phoneme { symbol: string; pron: string; long: boolean; }
 
@@ -108,11 +95,11 @@ interface PhonModel {
 }
 
 const E_DIM       = 8;
-const SYLL_F      = E_DIM + 6;  // features for one syllable (14)
-const H1          = 64;          // hidden layer 1 (wider for context window)
-const H2          = 32;          // hidden layer 2
-const IN          = SYLL_F * 3;  // prev + curr + next context (42)
-const MODEL_VER   = 2;           // bump when architecture changes → auto-reinit
+const SYLL_F      = E_DIM + 6;  
+const H1          = 64;          
+const H2          = 32;         
+const IN          = SYLL_F * 3;  
+const MODEL_VER   = 2;           
 
 const DEFAULT_PHONOLOGY: PhonologyData = {
     vowels: [
@@ -135,7 +122,6 @@ const DEFAULT_PHONOLOGY: PhonologyData = {
     notes: '',
 };
 
-// ─── Markdown table helpers ───────────────────────────────────────────────────
 
 function escapeCell(s: string): string {
     return (s ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
@@ -175,7 +161,6 @@ function buildMdTable(headers: string[], rows: string[][]): string {
     return [header, divider, ...body].join('\n');
 }
 
-// ─── Per-type parsers and serializers ─────────────────────────────────────────
 
 function parseRoots(content: string): Root[] {
     return parseMdTable(content)
@@ -192,7 +177,7 @@ function parseRoots(content: string): Root[] {
 function rootsToMd(roots: Root[]): string {
     return [
         '# Root Lexicon', '',
-        'Add roots here or use the Rootweave panel (📖 ribbon icon).', '',
+        'Add roots here or use the Rootweave panel.', '',
         buildMdTable(
             ['root', 'meaning', 'category', 'notes', 'alternates'],
             roots.map(r => [r.root, r.meaning, r.category, r.notes, r.alternates.join(', ')])
@@ -239,7 +224,7 @@ function parseRules(content: string): Rule[] {
 function rulesToMd(rules: Rule[]): string {
     return [
         '# Grammar Rules', '',
-        'Each rule describes a morphological construction — a prefix, suffix, or other affix.', '',
+        'Each rule describes a morphological construction such as a prefix, suffix, or other affix.', '',
         '- **prefix** — added before the word (e.g. on- for past tense)',
         '- **suffix** — added after the word (e.g. -iu for plural)',
         '- **infix** — inserted inside the word',
@@ -289,17 +274,14 @@ function phonologyToMd(p: PhonologyData): string {
     ].join('\n');
 }
 
-// Apply a prefix/suffix rule to a word and return the resulting form
 function applyRule(rule: Rule, word: string): string | null {
-    const affix = rule.form.replace(/^-|-$/g, ''); // strip display dashes
+    const affix = rule.form.replace(/^-|-$/g, '');
     if (rule.type === 'prefix') return affix + word;
     if (rule.type === 'suffix') return word + affix;
-    return null; // infix/other: too complex to auto-apply
+    return null; 
 }
 
-// ─── Import parser ────────────────────────────────────────────────────────────
-// Converts a template like "[root] - [meaning] ([category])" into a regex,
-// then applies it to each line of raw data.
+
 
 function escapeRe(s: string): string {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -358,7 +340,6 @@ function importWords(template: string, text: string): Word[] {
         });
 }
 
-// ── TTS helpers ───────────────────────────────────────────────────────────────
 
 function ttsSpeak(text: string, btn: HTMLButtonElement, rate = 1.0) {
     if (window.speechSynthesis.speaking) {
@@ -374,9 +355,7 @@ function ttsSpeak(text: string, btn: HTMLButtonElement, rate = 1.0) {
     window.speechSynthesis.speak(utt);
 }
 
-// Replace accented / special characters with plain ASCII equivalents
 function stripDiacritics(str: string): string {
-    // Manual mappings for characters that don't decompose via NFD
     const manual: Record<string, string> = {
         'æ':'ae','Æ':'AE','œ':'oe','Œ':'OE',
         'ø':'o', 'Ø':'O', 'ł':'l', 'Ł':'L',
@@ -385,12 +364,9 @@ function stripDiacritics(str: string): string {
     };
     let s = str;
     for (const from of Object.keys(manual)) s = s.split(from).join(manual[from]);
-    // NFD splits e.g. é → e + ́, then strip the combining marks
     return s.normalize('NFD').replace(/[̀-ͯ]/g, '');
 }
 
-// NN-assisted suggestion for a missing conlang word.
-// Priority: exact root match → partial root match → phonotactic generation.
 function suggestConlangWord(
     englishWord: string,
     roots: Root[],
@@ -400,25 +376,21 @@ function suggestConlangWord(
     const el = englishWord.toLowerCase();
     const meaningsOf = (m: string) => m.toLowerCase().split(/[\s,;/]+/).map(p => p.trim()).filter(Boolean);
 
-    // 1. Exact root meaning / alternate match
     const exactRoot = roots.find(r =>
         meaningsOf(r.meaning).some(p => p === el) ||
         r.alternates.map(a => a.toLowerCase()).indexOf(el) !== -1
     );
     if (exactRoot) return { form: exactRoot.root, hint: `root "${exactRoot.root}" (${exactRoot.meaning})` };
 
-    // 2. Partial root meaning overlap
     const partialRoot = roots.find(r =>
         meaningsOf(r.meaning).some(p => p.length > 2 && (el.includes(p) || p.includes(el)))
     );
     if (partialRoot) return { form: partialRoot.root, hint: `related root "${partialRoot.root}" (${partialRoot.meaning})` };
 
-    // 3. Phonotactically generated word using the inventory (and embedding similarity if model exists)
     const vowels = phon.vowels.map(v => v.symbol);
     const cons   = phon.consonants.map(c => c.symbol);
     if (vowels.length === 0) return { form: '', hint: '' };
 
-    // Weight consonants by embedding similarity to the English word's first letter when possible
     let pick = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
     if (model && cons.length > 1) {
         const firstLetter = el[0] ?? '';
@@ -441,7 +413,6 @@ function suggestConlangWord(
         generated += vowels[Math.floor(Math.random() * vowels.length)];
         if (s < sylCount - 1 && cons.length > 0) generated += pick(cons);
     }
-    // Retry once if a banned cluster appears
     if (phon.banned.some(b => b && generated.includes(b))) {
         generated = vowels[Math.floor(Math.random() * vowels.length)];
         for (let s = 0; s < sylCount - 1; s++) {
@@ -452,7 +423,6 @@ function suggestConlangWord(
     return { form: generated, hint: 'phonotactic suggestion' };
 }
 
-// Mirror capitalisation of source onto target: "Hello" → Title, "HELLO" → UPPER
 function matchCase(source: string, target: string): string {
     if (!source || !target) return target;
     if (source === source.toUpperCase() && /[A-Z]/.test(source)) return target.toUpperCase();
@@ -460,9 +430,7 @@ function matchCase(source: string, target: string): string {
     return target;
 }
 
-// ─── Phonology engine ─────────────────────────────────────────────────────────
 
-// Greedy longest-match tokenizer — handles multi-char phonemes like "th", "ae"
 function phonTokenize(word: string, phonemes: Phoneme[]): string[] {
     const syms = phonemes.map(p => p.symbol).sort((a, b) => b.length - a.length);
     const tokens: string[] = [];
@@ -475,7 +443,6 @@ function phonTokenize(word: string, phonemes: Phoneme[]): string[] {
     return tokens;
 }
 
-// Split token list into syllable groups using CV(C) nucleus-rules
 function phonSyllabify(tokens: string[], vowelSet: Set<string>): string[][] {
     if (!tokens.length) return [];
     const sylls: string[][] = [];
@@ -507,7 +474,6 @@ function makeSyllables(syllTokens: string[][], phon: PhonologyData): Syllable[] 
     });
 }
 
-// Render syllables as styled spans — stressed syllable is bold and accent-colored
 function renderSyllableDisplay(parent: HTMLElement, syllTokens: string[][], stressIdx: number) {
     syllTokens.forEach((syll, si) => {
         if (si > 0) parent.createSpan({ cls: 'rw-phon-dot', text: '-' });
@@ -518,15 +484,12 @@ function renderSyllableDisplay(parent: HTMLElement, syllTokens: string[][], stre
     });
 }
 
-// Build a pronunciation notation string using raw phoneme symbols.
-// Apostrophe goes before the stressed syllable: vel-'iu
 function phonReconstruct(syllTokens: string[][], stressIdx: number): string {
     return syllTokens.map((syll, si) =>
         (si === stressIdx ? "'" : '') + syll.join('')
     ).join('-');
 }
 
-// Build a "sounds like" reading using pron labels, e.g. "veh·ee·oo"
 function phonPronReading(syllTokens: string[][], stressIdx: number, phon: PhonologyData): string {
     const allPh = [...phon.vowels, ...phon.consonants];
     return syllTokens.map((syll, si) => {
@@ -535,7 +498,6 @@ function phonPronReading(syllTokens: string[][], stressIdx: number, phon: Phonol
     }).join('-');
 }
 
-// ── Neural network ─────────────────────────────────────────────────────────────
 
 function nnRand(n: number, fi: number, fo: number): number[] {
     const s = Math.sqrt(2 / (fi + fo));
@@ -543,7 +505,6 @@ function nnRand(n: number, fi: number, fo: number): number[] {
 }
 function nnZero(n: number): number[] { return Array.from({ length: n }, () => 0); }
 
-// Dense layer: output[j] = b[j] + Σ_i W[i*outD+j] * x[i]
 function matVec(W: number[], x: number[], inD: number, outD: number, b: number[]): number[] {
     const out = b.slice();
     for (let i = 0; i < inD; i++)
@@ -612,7 +573,6 @@ function phonGetEmbed(p: string, m: PhonModel): number[] {
     return m.E[p];
 }
 
-// 14-dim feature vector for one syllable
 function syllFeats(syll: Syllable, idx: number, total: number, m: PhonModel): number[] {
     const embeds = syll.phonemes.map(p => phonGetEmbed(p, m));
     const avgEmb = Array.from({ length: E_DIM }, (_, j) =>
@@ -630,8 +590,6 @@ function syllFeats(syll: Syllable, idx: number, total: number, m: PhonModel): nu
     ];
 }
 
-// 42-dim context window: [prev_feats, curr_feats, next_feats]
-// This lets the network learn stress from contrast between syllables, not just each syllable alone.
 function contextFeats(sylls: Syllable[], idx: number, m: PhonModel): number[] {
     const n    = sylls.length;
     const zero = Array.from({ length: SYLL_F }, () => 0);
@@ -641,7 +599,6 @@ function contextFeats(sylls: Syllable[], idx: number, m: PhonModel): number[] {
     return [...prev, ...curr, ...next];
 }
 
-// Clip gradient norm to prevent exploding gradients in the wider network
 function clipGrad(g: number[], maxNorm = 5): void {
     const norm = Math.sqrt(g.reduce((s, x) => s + x * x, 0));
     if (norm > maxNorm) { const scale = maxNorm / norm; for (let i = 0; i < g.length; i++) g[i] *= scale; }
@@ -698,7 +655,6 @@ function trainOnExample(ex: PronEx, m: PhonModel, phon: PhonologyData, lr = 0.00
         for (let i = 0; i < aW3.length; i++) aW3[i] += gW3[i];
         for (let i = 0; i < ab3.length; i++) ab3[i] += gb3[i];
         void gb3;
-        // Embedding gradient comes from the current-syllable slot (indices SYLL_F..SYLL_F+E_DIM)
         const dEmb = dFeat.slice(SYLL_F, SYLL_F + E_DIM);
         const nP   = syll.phonemes.length || 1;
         syll.phonemes.forEach(p => {
@@ -728,8 +684,6 @@ function trainOnExample(ex: PronEx, m: PhonModel, phon: PhonologyData, lr = 0.00
     });
 }
 
-// Parse typed stress notation: "'vel-i-u" or "vel-'i-u" → syllable index of stressed part.
-// Splits on -, ·, ., or space. Returns null if syllable count doesn't match.
 function parseStressNotation(text: string, syllCount: number): number | null {
     const parts = text.trim().split(/[-·.\s]+/).map(s => s.trim()).filter(Boolean);
     if (parts.length !== syllCount) return null;
@@ -743,19 +697,16 @@ function batchTrain(examples: PronEx[], m: PhonModel, phon: PhonologyData, epoch
             trainOnExample(ex, m, phon, 0.008 * (1 - ep / epochs * 0.4));
 }
 
-// ── Rhyme helpers ──────────────────────────────────────────────────────────────
 
-// English rhyme key: last vowel cluster + trailing consonants
 function englishRhymeKey(word: string): string {
     const w = word.toLowerCase().replace(/[^a-z]/g, '');
     const vowels = 'aeiouy';
     let i = w.length - 1;
-    while (i >= 0 && !vowels.includes(w[i])) i--;   // skip trailing consonants
-    while (i > 0  &&  vowels.includes(w[i - 1])) i--; // extend back over vowel cluster
+    while (i >= 0 && !vowels.includes(w[i])) i--;   
+    while (i > 0  &&  vowels.includes(w[i - 1])) i--; 
     return i >= 0 ? w.slice(i) : w;
 }
 
-// Detect rhyme scheme: returns ['A','A','B','B'] style array
 function detectRhymeScheme(keys: string[]): string[] {
     const map = new Map<string, string>();
     let next = 0;
@@ -765,8 +716,6 @@ function detectRhymeScheme(keys: string[]): string[] {
     });
 }
 
-// Conlang rhyme key: phoneme tokens from last-stressed-syllable nucleus onwards
-// Returns joined string (e.g. "ela") for exact matching, plus raw tokens for NN scoring
 function conlangRhymeKey(
     word: string,
     phon: PhonologyData,
@@ -782,7 +731,6 @@ function conlangRhymeKey(
     const stressed   = syllTokens[Math.min(stressIdx, syllTokens.length - 1)];
     const nucStart   = stressed.findIndex(p => vowelSet.has(p));
     if (nucStart < 0) return null;
-    // nucleus + coda of stressed syll + all following syllables
     const rhymeToks  = [
         ...stressed.slice(nucStart),
         ...syllTokens.slice(stressIdx + 1).flat(),
@@ -790,8 +738,6 @@ function conlangRhymeKey(
     return { key: rhymeToks.join(''), tokens: rhymeToks };
 }
 
-// NN-based rhyme similarity: cosine similarity of first-vowel embeddings
-// Returns 0–1 (1 = identical nucleus, 0 = completely unrelated)
 function rhymeSimilarity(a: string[], b: string[], m: PhonModel): number {
     const eA = a.length ? phonGetEmbed(a[0], m) : null;
     const eB = b.length ? phonGetEmbed(b[0], m) : null;
@@ -802,7 +748,6 @@ function rhymeSimilarity(a: string[], b: string[], m: PhonModel): number {
     return normA && normB ? dot / (normA * normB) : 0;
 }
 
-// ── PCA for phoneme map ────────────────────────────────────────────────────────
 
 function pca2d(vecs: number[][]): [number, number][] {
     if (vecs.length < 2) return vecs.map(() => [0, 0] as [number, number]);
@@ -830,7 +775,6 @@ function pca2d(vecs: number[][]): [number, number][] {
     return s1.map((x, i) => [x, s2[i]] as [number, number]);
 }
 
-// ── Phonotactics inference ─────────────────────────────────────────────────────
 
 function inferPhono(words: Word[], phon: PhonologyData): string[] {
     if (words.length < 3) return [];
@@ -862,22 +806,19 @@ function inferPhono(words: Word[], phon: PhonologyData): string[] {
     return results;
 }
 
-// ─── Graph types and layout ───────────────────────────────────────────────────
 
 interface GNode {
     id: string;
     kind: 'root' | 'word';
     label: string;
-    sub: string;   // meaning
-    tag: string;   // category or pos
+    sub: string;  
+    tag: string;   
     x: number; y: number;
     vx: number; vy: number;
 }
 
 interface GEdge { src: string; tgt: string; }
 
-// Basic force-directed layout — runs a fixed number of iterations then stops.
-// Good enough for conlang-sized graphs (tens to low hundreds of nodes).
 function forceLayout(nodes: GNode[], edges: GEdge[], W: number, H: number) {
     nodes.forEach((n, i) => {
         const a = (2 * Math.PI * i) / nodes.length;
@@ -891,7 +832,6 @@ function forceLayout(nodes: GNode[], edges: GEdge[], W: number, H: number) {
     for (let t = 0; t < 280; t++) {
         const damp = 0.9 - 0.5 * (t / 280);
 
-        // Node-to-node repulsion
         for (let i = 0; i < nodes.length; i++) {
             for (let j = i + 1; j < nodes.length; j++) {
                 const a = nodes[i], b = nodes[j];
@@ -906,7 +846,6 @@ function forceLayout(nodes: GNode[], edges: GEdge[], W: number, H: number) {
             }
         }
 
-        // Edge spring attraction
         edges.forEach(e => {
             const a = map.get(e.src), b = map.get(e.tgt);
             if (!a || !b) return;
@@ -917,7 +856,6 @@ function forceLayout(nodes: GNode[], edges: GEdge[], W: number, H: number) {
             b.vx -= (dx / d) * f; b.vy -= (dy / d) * f;
         });
 
-        // Soft gravity toward center
         nodes.forEach(n => {
             n.vx += (W / 2 - n.x) * 0.006;
             n.vy += (H / 2 - n.y) * 0.006;
@@ -931,7 +869,6 @@ function forceLayout(nodes: GNode[], edges: GEdge[], W: number, H: number) {
 const SVGNS = 'http://www.w3.org/2000/svg';
 const mksvg  = (tag: string) => activeDocument.createElementNS(SVGNS, tag);
 
-// ─── Plugin ───────────────────────────────────────────────────────────────────
 
 export default class RootweavePlugin extends Plugin {
     settings: Settings;
@@ -947,7 +884,6 @@ export default class RootweavePlugin extends Plugin {
         this.addCommand({ id: 'open',       name: 'Open panel',      callback: () => { void this.openPanel(); } });
         this.addCommand({ id: 'open-graph', name: 'Open root graph', callback: () => { void this.openGraph(); } });
         this.addSettingTab(new RootweaveSettingTab(this.app, this));
-        // Open automatically on startup, as a normal main-area tab
         this.app.workspace.onLayoutReady(() => { void this.openPanel(); });
     }
 
@@ -955,7 +891,6 @@ export default class RootweavePlugin extends Plugin {
         const { workspace } = this.app;
         let leaf = workspace.getLeavesOfType(VIEW_TYPE)[0];
         if (!leaf) {
-            // 'tab' forces a normal main-area tab, never the sidebar
             leaf = workspace.getLeaf('tab');
             await leaf.setViewState({ type: VIEW_TYPE, active: true });
         }
@@ -964,19 +899,14 @@ export default class RootweavePlugin extends Plugin {
 
     async openGraph() {
         const { workspace } = this.app;
-        // Re-use an existing graph leaf if one is already open
         let leaf = workspace.getLeavesOfType(VIEW_TYPE_GRAPH)[0];
         if (!leaf) {
-            // 'tab' forces a normal main-area tab even when the active leaf is a sidebar
             leaf = workspace.getLeaf('tab');
             await leaf.setViewState({ type: VIEW_TYPE_GRAPH, active: true });
         }
         await workspace.revealLeaf(leaf);
     }
 
-    // ── Vault I/O ─────────────────────────────────────────────────────────────
-    // We use adapter.read/write directly — vault.create/modify can fail silently
-    // when Obsidian's in-memory file cache hasn't caught up with recent changes.
 
     async readFile(path: string): Promise<string | null> {
         try { return await this.app.vault.adapter.read(normalizePath(path)); }
@@ -990,7 +920,6 @@ export default class RootweavePlugin extends Plugin {
         await this.app.vault.adapter.write(p, content);
     }
 
-    // ── Data I/O ──────────────────────────────────────────────────────────────
 
     async loadRoots(): Promise<Root[]>  { const c = await this.readFile(FILES.roots);   return c ? parseRoots(c) : []; }
     async saveRoots(r: Root[]):  Promise<void> { await this.writeFile(FILES.roots,   rootsToMd(r)); }
@@ -1012,14 +941,11 @@ export default class RootweavePlugin extends Plugin {
             if (leaf.view instanceof RootweaveView) await leaf.view.reload();
     }
 
-    // ── Settings (includes phonModel / phonExamples in pluginData) ────────────
 
     async loadSettings() {
         const data = (await this.loadData() as Record<string, unknown>) ?? {};
         this.settings     = { language: (data['language'] as string) ?? DEFAULT_SETTINGS.language };
         this.phonExamples = (data['phonExamples'] as PronEx[] | undefined) ?? [];
-        // wordStress is the authoritative word→stress override table.
-        // Migrate from phonExamples if wordStress hasn't been saved yet.
         const savedWS = data['wordStress'] as Record<string, number> | undefined;
         if (savedWS) {
             this.wordStress = savedWS;
@@ -1028,7 +954,6 @@ export default class RootweavePlugin extends Plugin {
             for (const ex of this.phonExamples) this.wordStress[ex.word] = ex.stress;
         }
         const saved = (data['phonModel'] as PhonModel | null | undefined) ?? null;
-        // Discard models from older architectures — examples are kept and will retrain
         this.phonModel = (saved && saved.version === MODEL_VER) ? saved : null;
     }
 
@@ -1042,7 +967,6 @@ export default class RootweavePlugin extends Plugin {
     }
 }
 
-// ─── Panel View ───────────────────────────────────────────────────────────────
 
 type Tab = 'roots' | 'builder' | 'words' | 'grammar' | 'translator' | 'export' | 'phonology';
 
@@ -1134,7 +1058,6 @@ class RootweaveView extends ItemView {
         }
     }
 
-    // ── Roots tab ─────────────────────────────────────────────────────────────
 
     private renderRoots(el: HTMLElement) {
         const ctrl = el.createDiv({ cls: 'rw-controls' });
@@ -1200,7 +1123,6 @@ class RootweaveView extends ItemView {
         draw();
     }
 
-    // ── Builder tab ───────────────────────────────────────────────────────────
 
     private renderBuilder(el: HTMLElement) {
         el.createEl('p', { cls: 'rw-subtitle', text: 'Type a word to see its root components and check grammar.' });
@@ -1234,7 +1156,6 @@ class RootweaveView extends ItemView {
                 suggestEl.createEl('p', { cls: 'rw-empty', text: 'No matching roots found.' });
             }
 
-            // Phoneme breakdown (only when phonology inventory is set up)
             const allPhonemes = [...this.phon.vowels, ...this.phon.consonants];
             if (allPhonemes.length > 0) {
                 const vowelSet = new Set(this.phon.vowels.map(v => v.symbol));
@@ -1300,7 +1221,6 @@ class RootweaveView extends ItemView {
                 }
             }
 
-            // Show each grammar rule applied to this word
             if (this.rules.length) {
                 formsEl.createEl('p', { cls: 'rw-label', text: 'Grammatical forms:' });
                 this.rules.forEach(rule => {
@@ -1344,13 +1264,12 @@ class RootweaveView extends ItemView {
                         analyze();
                     });
                 });
-            } // end else (word not yet in dictionary)
+            } 
         };
 
         wordInput.addEventListener('input', analyze);
     }
 
-    // ── Words tab ─────────────────────────────────────────────────────────────
 
     private renderWords(el: HTMLElement) {
         const ctrl   = el.createDiv({ cls: 'rw-controls' });
@@ -1412,7 +1331,6 @@ class RootweaveView extends ItemView {
         draw();
     }
 
-    // ── Grammar tab ───────────────────────────────────────────────────────────
 
     private renderGrammar(el: HTMLElement) {
         el.createEl('p', { cls: 'rw-subtitle', text: 'Rules are tested against each word in the Builder.' });
@@ -1459,12 +1377,10 @@ class RootweaveView extends ItemView {
         });
     }
 
-    // ── Translator tab ────────────────────────────────────────────────────────
 
     private renderTranslator(el: HTMLElement) {
         el.createEl('p', { cls: 'rw-subtitle', text: 'Translate using your dictionary and roots.' });
 
-        // ── Direction toggle ──────────────────────────────────────────────────
         let direction: 'forward' | 'reverse' = 'forward';
         const dirRow  = el.createDiv({ cls: 'rw-mode-row' });
         const btnFwd  = dirRow.createEl('button', { cls: 'rw-mode-btn is-active', text: 'English → Conlang' });
@@ -1488,7 +1404,6 @@ class RootweaveView extends ItemView {
         const outputEl     = el.createDiv({ cls: 'rw-translator-output' });
         const quickAddEl   = el.createDiv({ cls: 'rw-quick-add-panel' });
 
-        // Shared quick-add form — shown below output when a missing word is clicked
         const showQuickAdd = (englishWord: string, doTranslate: () => void) => {
             quickAddEl.empty();
             const { form: suggested, hint } = suggestConlangWord(
@@ -1530,14 +1445,12 @@ class RootweaveView extends ItemView {
             const fullInput = inputArea.value.trim();
             if (!fullInput) return;
 
-            // Unified dictionary: words + roots, both directions
             type DictEntry = { conlang: string; meaning: string };
             const dict: DictEntry[] = [
                 ...this.words.map(w => ({ conlang: w.word, meaning: w.meaning })),
                 ...this.roots.map(r => ({ conlang: r.root, meaning: r.meaning })),
             ];
 
-            // Strip leading/trailing punctuation from a token, keep the word core
             const splitToken = (token: string) => {
                 const m = token.match(/^([^a-zA-ZÀ-ɏ]*)(.+?)([^a-zA-ZÀ-ɏ]*)$/);
                 return m ? { prefix: m[1], word: m[2], suffix: m[3] } : { prefix: '', word: token, suffix: '' };
@@ -1565,7 +1478,6 @@ class RootweaveView extends ItemView {
                 line.trim() === '' ? [] : line.split(/\s+/).map(translateToken)
             );
 
-            // ── Confidence score ──────────────────────────────────────────────
             const allTokens  = ([] as TokenResult[]).concat(...lineResults);
             const realWords  = allTokens.filter((t: TokenResult) => t.word.length > 0);
             const foundWords = realWords.filter((t: TokenResult) => t.translated !== null);
@@ -1575,7 +1487,6 @@ class RootweaveView extends ItemView {
             confRow.createSpan({ cls: `rw-conf ${confCls}`, text: `${pct}% coverage` });
             confRow.createSpan({ cls: 'rw-trans-conf-detail', text: ` — ${foundWords.length} of ${realWords.length} words found` });
 
-            // ── Render lines ──────────────────────────────────────────────────
             const linesWrap = outputEl.createDiv({ cls: 'rw-trans-lines' });
 
             lineResults.forEach((results, li) => {
@@ -1620,7 +1531,6 @@ class RootweaveView extends ItemView {
                 }
             });
 
-            // ── Rhyme analysis (forward, multi-line only) ─────────────────────
             const nonEmptyLines = lineResults.filter(l => l.length > 0);
             if (direction === 'forward' && nonEmptyLines.length >= 2) {
                 const nonEmptySrcLines = inputLines.filter(l => l.trim() !== '');
@@ -1720,7 +1630,6 @@ class RootweaveView extends ItemView {
                 }
             }
 
-            // ── Copy + TTS ────────────────────────────────────────────────────
             const btnRow = outputEl.createDiv({ cls: 'rw-trans-btn-row' });
             btnRow.createEl('button', { cls: 'rw-btn rw-btn-sm', text: 'Copy' })
                 .addEventListener('click', () => {
@@ -1743,10 +1652,8 @@ class RootweaveView extends ItemView {
                         .map(({ word, translated }) => {
                             if (!translated) return word;
                             if (direction === 'reverse') {
-                                // "happy/glad" → "happy, glad" so TTS doesn't say "slash"
                                 return translated.split(/[/|]+/).map(p => p.trim()).filter(Boolean).join(', ');
                             }
-                            // Forward: always route through the pronunciation engine
                             if (!hasPhon) return translated;
                             const toks  = phonTokenize(translated.toLowerCase(), allPh);
                             const sylls = phonSyllabify(toks, vowelSet);
@@ -1767,7 +1674,6 @@ class RootweaveView extends ItemView {
         translateBtn.addEventListener('click', doTranslate);
     }
 
-    // ── Export tab ────────────────────────────────────────────────────────────
 
     private renderExport(el: HTMLElement) {
         el.createEl('p', { cls: 'rw-subtitle', text: 'Your data already lives in .rootweave/ as Markdown files. Export creates a single consolidated snapshot.' });
@@ -1807,10 +1713,8 @@ class RootweaveView extends ItemView {
             });
     }
 
-    // ── Phonology tab ─────────────────────────────────────────────────────────
 
     private renderPhonology(el: HTMLElement) {
-        // Auto-retrain after architecture upgrade (model discarded but examples kept)
         if (!this.plugin.phonModel && this.plugin.phonExamples.length > 0) {
             const allPh = [...this.phon.vowels, ...this.phon.consonants];
             const m = newPhonModel(allPh.map(p => p.symbol));
@@ -1843,7 +1747,6 @@ class RootweaveView extends ItemView {
             row.createEl('button', { cls: 'rw-btn rw-btn-sm rw-btn-danger', text: '×' }).addEventListener('click', onDelete);
         };
 
-        // ── Vowels ────────────────────────────────────────────────────────────
         const vowSection = el.createDiv({ cls: 'rw-phon-section' });
         vowSection.createEl('p', { cls: 'rw-label', text: 'Vowels' });
         vowSection.createEl('p', { cls: 'rw-subtitle', text: 'Symbol = how you type it, Sound = how to say it (e.g. "ah", "/a/").' });
@@ -1867,7 +1770,6 @@ class RootweaveView extends ItemView {
 
         el.createDiv({ cls: 'rw-divider' });
 
-        // ── Consonants ────────────────────────────────────────────────────────
         const conSection = el.createDiv({ cls: 'rw-phon-section' });
         conSection.createEl('p', { cls: 'rw-label', text: 'Consonants' });
         const conList = conSection.createDiv({ cls: 'rw-phon-list' });
@@ -1890,7 +1792,6 @@ class RootweaveView extends ItemView {
 
         el.createDiv({ cls: 'rw-divider' });
 
-        // ── Validation mode ───────────────────────────────────────────────────
         const modeSection = el.createDiv({ cls: 'rw-phon-section' });
         modeSection.createEl('p', { cls: 'rw-label', text: 'Validation mode' });
         const modeRow = modeSection.createDiv({ cls: 'rw-mode-row' });
@@ -1920,7 +1821,6 @@ class RootweaveView extends ItemView {
 
         el.createDiv({ cls: 'rw-divider' });
 
-        // ── Try a word ────────────────────────────────────────────────────────
         const trySection = el.createDiv({ cls: 'rw-phon-section' });
         trySection.createEl('p', { cls: 'rw-label', text: 'Try a word' });
         trySection.createEl('p', { cls: 'rw-subtitle', text: 'See how a word breaks into phonemes and syllables. Click a syllable to correct the stress — the network learns each time.' });
@@ -1943,7 +1843,6 @@ class RootweaveView extends ItemView {
 
             if (!tokens.length) return;
 
-            // Syllable breakdown display
             const breakRow = tryResult.createDiv({ cls: 'rw-phon-break' });
             syllTokens.forEach((syll, si) => {
                 if (si > 0) breakRow.createSpan({ cls: 'rw-phon-dot', text: ' · ' });
@@ -1960,14 +1859,10 @@ class RootweaveView extends ItemView {
                 this.plugin.phonModel = newPhonModel(allPh.map(p => p.symbol));
             const model = this.plugin.phonModel;
 
-            // wordStress is the authoritative override table — O(1) lookup, no array scan
             const storedStress: number | undefined = this.plugin.wordStress[w];
 
-            // Shared correction handler
             const submitCorrection = (stressIdx: number) => {
-                // Update the simple override table immediately
                 this.plugin.wordStress[w] = stressIdx;
-                // Also keep phonExamples in sync for NN training
                 const ex: PronEx = { word: w, sylls: syllTokens, stress: stressIdx };
                 const prev = this.plugin.phonExamples.findIndex(e => e.word === w);
                 if (prev >= 0) this.plugin.phonExamples[prev] = ex;
@@ -1982,7 +1877,6 @@ class RootweaveView extends ItemView {
                 tryWord(stressIdx);
             };
 
-            // forcedStress (from submitCorrection) > wordStress override > NN prediction
             const activeStress = forcedStress !== undefined
                 ? forcedStress
                 : (storedStress !== undefined
@@ -2069,7 +1963,6 @@ class RootweaveView extends ItemView {
             if (this.phon.mode === 'strict' && unknown.length > 0)
                 tryResult.createEl('p', { cls: 'rw-phon-warn', text: `Unknown sounds: ${[...new Set(unknown)].join(', ')} — add them to your inventory above.` });
 
-            // Banned cluster check
             const wordStr = tokens.join('');
             const hits    = this.phon.banned.filter(b => b && wordStr.includes(b));
             if (hits.length)
@@ -2080,7 +1973,6 @@ class RootweaveView extends ItemView {
 
         el.createDiv({ cls: 'rw-divider' });
 
-        // ── Phoneme map ───────────────────────────────────────────────────────
         const mapSection = el.createDiv({ cls: 'rw-phon-section' });
         mapSection.createEl('p', { cls: 'rw-label', text: 'Phoneme map' });
 
@@ -2138,14 +2030,12 @@ class RootweaveView extends ItemView {
 
         el.createDiv({ cls: 'rw-divider' });
 
-        // ── Notes ─────────────────────────────────────────────────────────────
         const notesSection = el.createDiv({ cls: 'rw-phon-section' });
         notesSection.createEl('p', { cls: 'rw-label', text: 'Notes' });
         const notesArea = notesSection.createEl('textarea', { cls: 'rw-textarea', attr: { placeholder: 'Free-form phonology notes…', rows: '3' } });
         notesArea.value = this.phon.notes;
         notesArea.addEventListener('change', () => { this.phon.notes = notesArea.value; savePhon(); });
 
-        // ── Observations ──────────────────────────────────────────────────────
         const obs = inferPhono(this.words, this.phon);
         if (obs.length) {
             el.createDiv({ cls: 'rw-divider' });
@@ -2156,7 +2046,6 @@ class RootweaveView extends ItemView {
             obs.forEach(o => obsList.createEl('li', { text: o }));
         }
 
-        // ── Training info ─────────────────────────────────────────────────────
         if (this.plugin.phonExamples.length > 0) {
             el.createDiv({ cls: 'rw-divider' });
             const trainSection = el.createDiv({ cls: 'rw-phon-section' });
@@ -2189,7 +2078,6 @@ class RootweaveView extends ItemView {
     }
 }
 
-// ─── Graph View ───────────────────────────────────────────────────────────────
 
 class GraphView extends ItemView {
     plugin: RootweavePlugin;
@@ -2222,7 +2110,6 @@ class GraphView extends ItemView {
         el.empty();
         el.addClass('rw-graph-view');
 
-        // Toolbar
         const bar = el.createDiv({ cls: 'rw-graph-bar' });
         const legend = bar.createSpan({ cls: 'rw-graph-legend' });
         legend.createSpan({ cls: 'rw-legend-root', text: '●' });
@@ -2238,7 +2125,6 @@ class GraphView extends ItemView {
         }
 
         const canvas = el.createDiv({ cls: 'rw-graph-canvas' });
-        // Wait one frame so the container has layout dimensions before we measure it
         window.requestAnimationFrame(() => { this.buildGraph(canvas); });
     }
 
@@ -2246,7 +2132,6 @@ class GraphView extends ItemView {
         const W = container.clientWidth  || 500;
         const H = container.clientHeight || 500;
 
-        // Build node and edge lists from plugin data
         const nodes: GNode[] = [
             ...this.roots.map(r => ({ id: `r:${r.root}`, kind: 'root' as const, label: r.root, sub: r.meaning, tag: r.category, x: 0, y: 0, vx: 0, vy: 0 })),
             ...this.words.map(w => ({ id: `w:${w.word}`, kind: 'word' as const, label: w.word, sub: w.meaning, tag: w.pos,      x: 0, y: 0, vx: 0, vy: 0 })),
@@ -2261,13 +2146,11 @@ class GraphView extends ItemView {
 
         const nodeMap = new Map(nodes.map(n => [n.id, n]));
 
-        // SVG root
         const svg = mksvg('svg') as SVGSVGElement;
         svg.setAttribute('width',  String(W));
         svg.setAttribute('height', String(H));
         container.appendChild(svg);
 
-        // One group we transform for pan/zoom
         let panX = 0, panY = 0, zoom = 1;
         const world = mksvg('g') as SVGGElement;
         svg.appendChild(world);
@@ -2276,13 +2159,11 @@ class GraphView extends ItemView {
             world.setAttribute('transform', `translate(${panX},${panY}) scale(${zoom})`);
         applyTransform();
 
-        // Convert screen coords to graph coords
         const toGraph = (ex: number, ey: number) => {
             const r = svg.getBoundingClientRect();
             return { x: (ex - r.left - panX) / zoom, y: (ey - r.top - panY) / zoom };
         };
 
-        // ── Edges ──────────────────────────────────────────────────────────────
 
         const edgeEls = new Map<string, SVGLineElement>();
         edges.forEach(e => {
@@ -2304,7 +2185,6 @@ class GraphView extends ItemView {
             line.setAttribute('x2', String(tgt.x)); line.setAttribute('y2', String(tgt.y));
         });
 
-        // ── Nodes ──────────────────────────────────────────────────────────────
 
         const nodeEls = new Map<string, SVGGElement>();
         const tip = container.createDiv({ cls: 'rw-graph-tip' });
@@ -2337,7 +2217,6 @@ class GraphView extends ItemView {
             g.addEventListener('mouseleave', () => tip.removeClass('is-visible'));
         });
 
-        // ── Pointer interaction (drag nodes, pan background, zoom) ─────────────
 
         let dragNode: GNode | null = null;
         let dragOX = 0, dragOY = 0;
@@ -2385,7 +2264,6 @@ class GraphView extends ItemView {
     }
 }
 
-// ─── Root Modal ───────────────────────────────────────────────────────────────
 
 class RootModal extends Modal {
     private existing: Root | null;
@@ -2435,7 +2313,6 @@ class RootModal extends Modal {
     onClose() { this.contentEl.empty(); }
 }
 
-// ─── Word Modal ───────────────────────────────────────────────────────────────
 
 class WordModal extends Modal {
     private existing: Word | null;
@@ -2483,7 +2360,6 @@ class WordModal extends Modal {
     onClose() { this.contentEl.empty(); }
 }
 
-// ─── Rule Modal ───────────────────────────────────────────────────────────────
 
 class RuleModal extends Modal {
     private existing: Rule | null;
@@ -2514,10 +2390,10 @@ class RuleModal extends Modal {
         const typeWrap = contentEl.createDiv({ cls: 'rw-modal-field' });
         typeWrap.createEl('label', { text: 'Type' });
         const typeSel = typeWrap.createEl('select', { cls: 'rw-select' });
-        typeSel.createEl('option', { value: 'prefix',  text: 'prefix — added before the word (e.g. on-)' });
-        typeSel.createEl('option', { value: 'suffix',  text: 'suffix — added after the word (e.g. -iu)' });
-        typeSel.createEl('option', { value: 'infix',   text: 'infix — inserted inside the word' });
-        typeSel.createEl('option', { value: 'other',   text: 'other — freeform rule or particle' });
+        typeSel.createEl('option', { value: 'prefix',  text: 'prefix: added before the word (e.g. on-)' });
+        typeSel.createEl('option', { value: 'suffix',  text: 'suffix: added after the word (e.g. -iu)' });
+        typeSel.createEl('option', { value: 'infix',   text: 'infix: inserted inside the word' });
+        typeSel.createEl('option', { value: 'other',   text: 'other: freeform rule or particle' });
         if (this.existing?.type) typeSel.value = this.existing.type;
 
         const saveBtn = contentEl.createEl('button', { cls: 'rw-btn rw-btn-primary', text: 'Save' });
@@ -2543,7 +2419,6 @@ class RuleModal extends Modal {
     onClose() { this.contentEl.empty(); }
 }
 
-// ─── Settings Tab ─────────────────────────────────────────────────────────────
 
 class RootweaveSettingTab extends PluginSettingTab {
     plugin: RootweavePlugin;
@@ -2648,7 +2523,7 @@ class RootweaveSettingTab extends PluginSettingTab {
 
                         if (importType === 'roots') {
                             const parsed = importRoots(tmpl, data);
-                            if (!parsed.length) { new Notice('No lines matched the template — check your format.'); return; }
+                            if (!parsed.length) { new Notice('No lines matched the template. Try checking your format.'); return; }
                             void this.plugin.loadRoots().then(existing => {
                                 const merged = [...existing];
                                 let added = 0, skipped = 0;
@@ -2684,11 +2559,11 @@ class RootweaveSettingTab extends PluginSettingTab {
     private cleanseDef(): SettingDefinitionRender {
         return {
             name: 'Cleanse special characters',
-            desc: 'Replace accented and non-ASCII letters in all roots and words with plain equivalents (e.g. Ñ→N, é→e, ü→u, æ→ae). Edits your files — make a backup first.',
+            desc: 'Replace accented and non-ASCII letters in all roots and words with plain equivalents (e.g. Ñ→N, é→e, ü→u, æ→ae).',
             render: setting => {
                 setting
                     .setName('Cleanse special characters')
-                    .setDesc('Replace accented and non-ASCII letters in all roots and words with plain equivalents (e.g. Ñ→N, é→e, ü→u, æ→ae). Edits your files — make a backup first.')
+                    .setDesc('Replace accented and non-ASCII letters in all roots and words with plain equivalents (e.g. Ñ→N, é→e, ü→u, æ→ae).')
                     .addButton(btn => btn
                         .setButtonText('Cleanse')
                         .setClass('mod-warning')
